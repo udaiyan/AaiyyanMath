@@ -8,3 +8,5 @@ __pycache__/
 /out
 /reports
 .aaiyyan-recovery/
+# JetBrains IDE
+.idea/
