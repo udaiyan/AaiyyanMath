@@ -1,0 +1,27 @@
+[package]
+name = "aaiyyan-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+python = ["aaiyyan-python-runtime/python"]
+
+[dependencies]
+aaiyyan-ast.workspace = true
+aaiyyan-parser.workspace = true
+aaiyyan-units.workspace = true
+aaiyyan-evaluator.workspace = true
+aaiyyan-dependency.workspace = true
+aaiyyan-codegen.workspace = true
+aaiyyan-python-runtime.workspace = true
+aaiyyan-symbolic.workspace = true
+aaiyyan-plotting.workspace = true
+aaiyyan-worksheet.workspace = true
+aaiyyan-project.workspace = true
+aaiyyan-reporting.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true

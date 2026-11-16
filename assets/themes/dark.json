@@ -1,0 +1,9 @@
+{
+  "name": "dark",
+  "background": "#12161c",
+  "panel": "#1a1f27",
+  "text": "#dce3ea",
+  "accent": "#5aaae6",
+  "error": "#e66e64",
+  "ok": "#6ec88c"
+}

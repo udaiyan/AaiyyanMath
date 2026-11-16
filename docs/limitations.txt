@@ -1,0 +1,17 @@
+KNOWN MVP LIMITATIONS (explicit, not hidden)
+
+1. Arrays are dimensionless. Matrices and vectors store plain f64 values;
+   quantities inside arrays are rejected with a clear error. Scalar unit
+   algebra is complete. Plan: unit-carrying arrays with per-array metadata.
+2. Indexing is 0-based to match NumPy code generation.
+3. Native eigenvalues support symmetric matrices only; general matrices are
+   routed to NumPy through the Python backend.
+4. Symbolic operations (diff, integrate with 2 args, limit, simplify, expand,
+   factor, solve_eq, dsolve, series) require the embedded Python backend.
+5. Cancellation cannot interrupt a single long C-level NumPy/SciPy call.
+6. The equation editor is text-first with native rendering; a fully structured
+   visual editor is planned on top of the same AST.
+7. PDF export requires the external `typst` CLI; Typst/HTML/Markdown export is
+   fully native.
+8. Image blocks display path and caption; native image decoding is not wired in.
+9. Embedded Python provides no sandboxing; user code requires explicit trust.

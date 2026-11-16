@@ -1,0 +1,10 @@
+[package]
+name = "aaiyyan-symbolic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aaiyyan-ast.workspace = true
+aaiyyan-codegen.workspace = true
+aaiyyan-python-runtime.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "aaiyyan-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+uuid.workspace = true
+
+[dev-dependencies]
+aaiyyan-core.workspace = true
+aaiyyan-project.workspace = true
+aaiyyan-units.workspace = true
+aaiyyan-evaluator.workspace = true

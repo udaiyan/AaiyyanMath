@@ -1,0 +1,34 @@
+EMBEDDED PYTHON
+
+Compatibility
+  Rust: stable toolchain (see rust-toolchain.toml)
+  PyO3: 0.22 (feature "auto-initialize")
+  Python: 3.11 or 3.12 recommended
+  Libraries: python/requirements/requirements.txt (pinned)
+
+Build without Python (default)
+  cargo run -p aaiyyan-app
+  The native Rust engine handles scalars, units, matrices, ODEs (RK4),
+  optimisation, fitting and plotting.
+
+Build with embedded Python
+  python python/bootstrap/setup_env.py
+  export PYO3_PYTHON=<venv python>        (Windows: $env:PYO3_PYTHON = "...")
+  cargo run -p aaiyyan-app --features python
+  Add the venv path in Settings > Python extra paths if packages are not found.
+
+Execution model
+  One interpreter, one dedicated worker thread, message passing only.
+  Generated code and user code are distinguished by CodeKind.
+  User code needs both the per-block trust checkbox and the global allow flag.
+  Cancellation uses sys.settrace plus a Rust atomic; long C-level NumPy calls
+  cannot be interrupted mid-call.
+
+GUI dependency pins
+  egui / eframe / egui_plot are pinned to =0.28.1. When upgrading, check
+  eframe::run_native's app-creator signature and Painter/Rounding APIs.
+
+Security
+  Embedded Python is NOT a sandbox and provides NO process isolation.
+  The Request/Response interface is designed so an isolated backend can be
+  added later without changing the worksheet or the code generator.

@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+.venv/
+__pycache__/
+*.pyc
+*.bak
+*.aaiyyan.tmp
+/out
+/reports
+.aaiyyan-recovery/

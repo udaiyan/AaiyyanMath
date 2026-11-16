@@ -1,0 +1,12 @@
+[package]
+name = "aaiyyan-plotting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aaiyyan-ast.workspace = true
+aaiyyan-parser.workspace = true
+aaiyyan-evaluator.workspace = true
+aaiyyan-units.workspace = true
+serde.workspace = true

@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "tests/integration"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+aaiyyan-ast = { path = "crates/ast" }
+aaiyyan-parser = { path = "crates/parser" }
+aaiyyan-units = { path = "crates/units" }
+aaiyyan-evaluator = { path = "crates/evaluator" }
+aaiyyan-dependency = { path = "crates/dependency" }
+aaiyyan-codegen = { path = "crates/codegen" }
+aaiyyan-python-runtime = { path = "crates/python_runtime" }
+aaiyyan-symbolic = { path = "crates/symbolic" }
+aaiyyan-plotting = { path = "crates/plotting" }
+aaiyyan-worksheet = { path = "crates/worksheet" }
+aaiyyan-project = { path = "crates/project" }
+aaiyyan-reporting = { path = "crates/reporting" }
+aaiyyan-core = { path = "crates/core" }
+aaiyyan-gui = { path = "crates/gui" }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.11"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+nalgebra = "0.33"
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
+egui = "=0.28.1"
+eframe = "=0.28.1"
+egui_plot = "=0.28.1"
+rfd = "0.14"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

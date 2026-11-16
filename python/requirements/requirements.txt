@@ -1,0 +1,8 @@
+# Pinned, mutually compatible scientific stack for Python 3.11 / 3.12.
+numpy==1.26.4
+scipy==1.13.1
+sympy==1.12.1
+pandas==2.2.2
+matplotlib==3.9.0
+Pint==0.24
+openpyxl==3.1.4
