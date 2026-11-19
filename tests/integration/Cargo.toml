@@ -13,3 +13,7 @@ aaiyyan-core.workspace = true
 aaiyyan-project.workspace = true
 aaiyyan-units.workspace = true
 aaiyyan-evaluator.workspace = true
+
+[features]
+default = []
+python = ["aaiyyan-core/python"]

@@ -20,7 +20,7 @@ pub const NAMES: &[&str] = &[
 ];
 
 pub fn is_builtin(name: &str) -> bool {
-    NAMES.contains(&name) || crate::builtins_ext::NAMES.contains(&name)
+    NAMES.contains(&name) || crate::builtins_ext::NAMES.contains(&name) || crate::functions::is_known(name)
 }
 
 fn arity(name: &str, args: &[Value], n: usize) -> Result<(), EvalError> {
@@ -492,7 +492,10 @@ pub fn call(name: &str, args: &[Value], ev: &mut Evaluator, env: &mut Environmen
         }
         other => match crate::builtins_ext::call(other, args, ev, env) {
             Some(result) => result,
-            None => Err(EvalError::UnknownFunction(other.to_string())),
+            None => match crate::functions::call(other, args, ev, env) {
+                Some(result) => result,
+                None => Err(EvalError::UnknownFunction(other.to_string())),
+            },
         },
     }
 }

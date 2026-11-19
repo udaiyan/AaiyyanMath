@@ -27,6 +27,7 @@ name = "aaiyyan-codegen"
 version = "0.1.0"
 dependencies = [
  "aaiyyan-ast",
+ "aaiyyan-evaluator",
  "aaiyyan-units",
 ]
 

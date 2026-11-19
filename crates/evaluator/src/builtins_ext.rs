@@ -335,3 +335,96 @@ fn invoke(name: &str, args: &[Value], ev: &mut Evaluator, env: &mut Environment)
         other => Err(EvalError::UnknownFunction(other.to_string())),
     }
 }
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    fn ex(name: &str, args: &[Value]) -> Value {
+        let mut e = Evaluator::new(Default::default());
+        let mut env = Environment::new();
+        call(name, args, &mut e, &mut env)
+            .unwrap_or_else(|| panic!("{name} not in builtins_ext"))
+            .unwrap_or_else(|err| panic!("{name} failed: {err}"))
+    }
+    fn sc(name: &str, args: &[Value]) -> f64 { match ex(name,args){ Value::Scalar(x)=>x, _=>panic!("{name}: scalar") } }
+    fn vv(name: &str, args: &[Value]) -> Vec<f64> { match ex(name,args){ Value::Vector(a)=>a, Value::Matrix(m)=>m.data, _=>panic!("{name}: array") } }
+    fn mm(name: &str, args: &[Value]) -> Matrix { match ex(name,args){ Value::Matrix(m)=>m, Value::Vector(a)=>Matrix::new(a.len(),1,a), _=>panic!("{name}: matrix") } }
+    fn v1(d: &[f64]) -> Value { Value::Vector(d.to_vec()) }
+    fn m2(r:usize,c:usize,d:&[f64])->Value{ Value::Matrix(Matrix::new(r,c,d.to_vec())) }
+    fn near(a:f64,b:f64)->bool{ (a-b).abs()<1e-9 }
+    fn nearv(a:&[f64],b:&[f64])->bool{ a.len()==b.len() && a.iter().zip(b).all(|(x,y)| near(*x,*y)) }
+    const PI: f64 = std::f64::consts::PI;
+
+    #[test] fn reciprocal_trig() {
+        assert!(near(sc("sec",&[Value::Scalar(0.0)]),1.0));
+        assert!(near(sc("csc",&[Value::Scalar(PI/2.0)]),1.0));
+        assert!(near(sc("cot",&[Value::Scalar(PI/4.0)]),1.0));
+        assert!(near(sc("asec",&[Value::Scalar(1.0)]),0.0));
+        assert!(near(sc("acsc",&[Value::Scalar(1.0)]),PI/2.0));
+        assert!(near(sc("acot",&[Value::Scalar(1.0)]),PI/4.0));
+        assert!(near(sc("sinc",&[Value::Scalar(0.0)]),1.0));
+        assert!(sc("sinc",&[Value::Scalar(PI)]).abs()<1e-9);
+        assert!(near(sc("sech",&[Value::Scalar(0.0)]),1.0));
+    }
+    #[test] fn number_theory_and_clamp() {
+        assert!(near(sc("frac",&[Value::Scalar(1.5)]),0.5));
+        assert!(near(sc("frac",&[Value::Scalar(-1.5)]),-0.5));
+        assert!(near(sc("clamp",&[Value::Scalar(5.0),Value::Scalar(1.0),Value::Scalar(3.0)]),3.0));
+        assert!(near(sc("gcd",&[Value::Scalar(12.0),Value::Scalar(18.0)]),6.0));
+        assert!(near(sc("lcm",&[Value::Scalar(4.0),Value::Scalar(6.0)]),12.0));
+        assert!(near(sc("nroot",&[Value::Scalar(27.0),Value::Scalar(3.0)]),3.0));
+        assert!(near(sc("nroot",&[Value::Scalar(-8.0),Value::Scalar(3.0)]),-2.0));
+        assert!(near(sc("log1p",&[Value::Scalar(0.0)]),0.0));
+        assert!(near(sc("expm1",&[Value::Scalar(0.0)]),0.0));
+    }
+    #[test] fn statistics() {
+        assert!(near(sc("geomean",&[v1(&[1.0,4.0])]),2.0));
+        assert!(near(sc("harmmean",&[v1(&[1.0,4.0])]),1.6));
+        assert!(near(sc("rms",&[v1(&[3.0,4.0])]),(12.5f64).sqrt()));
+        assert!(near(sc("mode",&[v1(&[1.0,2.0,2.0,3.0])]),2.0));
+        assert!(near(sc("percentile",&[v1(&[1.0,2.0,3.0,4.0]),Value::Scalar(50.0)]),2.5));
+        assert!(near(sc("corr",&[v1(&[1.0,2.0,3.0]),v1(&[2.0,4.0,6.0])]),1.0));
+        assert!(near(sc("cov",&[v1(&[1.0,2.0,3.0]),v1(&[1.0,2.0,3.0])]),1.0));
+        assert!(sc("skew",&[v1(&[1.0,2.0,3.0,4.0,5.0])]).abs()<1e-9);
+        // Excess kurtosis of a discrete uniform sample is -1.3, not 0.
+        assert!((sc("kurt",&[v1(&[1.0,2.0,3.0,4.0,5.0])]) + 1.3).abs() < 1e-9);
+    }
+    #[test] fn matrix_assembly() {
+        let a = m2(2,2,&[1.0,2.0,3.0,4.0]);
+        assert_eq!(mm("augment",&[a.clone(),a.clone()]).cols,4);
+        assert_eq!(mm("stack",&[a.clone(),a.clone()]).rows,4);
+        assert!(nearv(&vv("row",&[a.clone(),Value::Scalar(0.0)]),&[1.0,2.0]));
+        assert!(nearv(&vv("col",&[a.clone(),Value::Scalar(0.0)]),&[1.0,3.0]));
+        assert!(near(sc("last",&[v1(&[7.0,8.0,9.0])]),9.0));
+        assert!(nearv(&vv("cumsum",&[v1(&[1.0,2.0,3.0])]),&[1.0,3.0,6.0]));
+        assert!(nearv(&vv("cumprod",&[v1(&[1.0,2.0,3.0])]),&[1.0,2.0,6.0]));
+        assert!(nearv(&vv("logspace",&[Value::Scalar(0.0),Value::Scalar(2.0),Value::Scalar(3.0)]),&[1.0,10.0,100.0]));
+    }
+    #[test] fn interpolation_and_fitting() {
+        assert!(near(sc("linterp",&[v1(&[0.0,1.0,2.0]),v1(&[0.0,1.0,4.0]),Value::Scalar(1.5)]),2.5));
+        // linfit returns [slope, intercept] (descending powers).
+        // y = 2x + 2 at x = 0,1,2  ->  [slope, intercept] = [2, 2].
+        assert!(nearv(&vv("linfit", &[v1(&[0.0, 1.0, 2.0]), v1(&[2.0, 4.0, 6.0])]), &[2.0, 2.0]));
+        // Zero-intercept data pins the coefficient order unambiguously.
+        assert!(nearv(&vv("linfit", &[v1(&[0.0, 1.0, 2.0]), v1(&[0.0, 2.0, 4.0])]), &[2.0, 0.0]));
+        let y: Vec<f64> = (0..3).map(|i| 2.0 * (0.5*i as f64).exp()).collect();
+        let f = vv("expfit",&[v1(&[0.0,1.0,2.0]), v1(&y)]);
+        assert!(near(f[0],2.0) && near(f[1],0.5));
+        let pf = vv("pwrfit",&[v1(&[1.0,2.0,4.0]), v1(&[1.0,2.0,4.0])]);
+        assert!(near(pf[1],1.0));
+    }
+    #[test] fn random_seed_determinism() {
+        sc("seed",&[Value::Scalar(3.0)]);
+        let a = vv("runif",&[Value::Scalar(6.0),Value::Scalar(0.0),Value::Scalar(1.0)]);
+        sc("seed",&[Value::Scalar(3.0)]);
+        let b = vv("runif",&[Value::Scalar(6.0),Value::Scalar(0.0),Value::Scalar(1.0)]);
+        assert!(nearv(&a,&b));
+        assert_eq!(vv("rnorm",&[Value::Scalar(5.0),Value::Scalar(0.0),Value::Scalar(1.0)]).len(),5);
+    }
+    #[test] fn unknown_returns_none() {
+        let mut e = Evaluator::new(Default::default());
+        let mut env = Environment::new();
+        assert!(call("zzz_not_a_fn", &[], &mut e, &mut env).is_none());
+    }
+}

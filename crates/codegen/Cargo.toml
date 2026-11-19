@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 aaiyyan-ast.workspace = true
+aaiyyan-evaluator.workspace = true
 aaiyyan-units.workspace = true

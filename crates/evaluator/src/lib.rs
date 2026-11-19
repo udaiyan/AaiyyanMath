@@ -2,6 +2,7 @@
 //! it talks to `aaiyyan-core`, which schedules work on this engine.
 pub mod builtins;
 pub mod builtins_ext;
+pub mod functions;
 pub mod env;
 pub mod interp;
 pub mod linalg;

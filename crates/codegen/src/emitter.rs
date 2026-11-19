@@ -243,7 +243,10 @@ impl Emitter {
             "slider" | "input_number" | "checkbox" | "dropdown" => first,
             "print" => format!("print({join})"),
             other => {
-                if crate::NATIVE_HELPERS.contains(&other) {
+                if aaiyyan_evaluator::functions::is_known(other) {
+                    let call_args = if join.is_empty() { format!("\"{other}\"") } else { format!("\"{other}\", {join}") };
+                    format!("aaiyyan.mcall({call_args})")
+                } else if crate::NATIVE_HELPERS.contains(&other) {
                     format!("aaiyyan.{other}({join})")
                 } else {
                     let n = self.name(other);

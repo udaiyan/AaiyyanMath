@@ -10,3 +10,4 @@ __pycache__/
 .aaiyyan-recovery/
 # JetBrains IDE
 .idea/
+.aaiyyan-backup/
