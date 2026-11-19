@@ -28,7 +28,7 @@ fn main() -> Result<(), eframe::Error> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1440.0, 920.0])
+            .with_maximized(true)
             .with_min_inner_size([900.0, 600.0])
             .with_title("AaiyyanMath"),
         ..Default::default()
