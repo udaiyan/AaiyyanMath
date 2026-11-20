@@ -52,6 +52,8 @@ pub fn ribbon(ctx: &egui::Context, session: &mut Session, state: &mut UiState, a
                     ui.add_space(4.0);
                     if theme::ribbon_button(ui, Icon::Undo, "", false, session.history.can_undo(), &t).on_hover_text("Undo (Ctrl+Z)").clicked() { actions.push(UiAction::Undo); }
                     if theme::ribbon_button(ui, Icon::Redo, "", false, session.history.can_redo(), &t).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() { actions.push(UiAction::Redo); }
+                    ui.add_space(6.0);
+                    if theme::ribbon_button(ui, Icon::Zoom, "", false, true, &t).on_hover_text("Focus mode — hide all panels (F11)").clicked() { actions.push(UiAction::ToggleZen); }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let calc = egui::Button::new(egui::RichText::new("Calculate   F5").size(12.0).strong().color(Color32::WHITE))
                             .fill(if session.busy { t.ink_faint } else { t.ok })
@@ -323,7 +325,9 @@ fn document_tab(ui: &mut Ui, actions: &mut Vec<UiAction>, t: &Theme) {
 
 fn view_tab(ui: &mut Ui, session: &mut Session, state: &mut UiState, actions: &mut Vec<UiAction>, t: &Theme) {
     theme::ribbon_group(ui, "Panels", t, |ui| {
-        theme::ribbon_stack(ui, 116.0, |ui| {
+        theme::ribbon_stack(ui, 150.0, |ui| {
+            let mut top = state.show_ribbon;
+            if ui.checkbox(&mut top, "Ribbon").changed() { actions.push(UiAction::TogglePanel(3)); }
             let mut l = session.project.layout.show_left;
             if ui.checkbox(&mut l, "Navigation").changed() { actions.push(UiAction::TogglePanel(0)); }
             let mut r = session.project.layout.show_right;
@@ -331,6 +335,10 @@ fn view_tab(ui: &mut Ui, session: &mut Session, state: &mut UiState, actions: &m
             let mut b = session.project.layout.show_bottom;
             if ui.checkbox(&mut b, "Output dock").changed() { actions.push(UiAction::TogglePanel(2)); }
         });
+    });
+    theme::ribbon_group(ui, "Focus", t, |ui| {
+        if theme::ribbon_button(ui, Icon::Zoom, if state.zen { "Exit focus" } else { "Focus mode" }, true, true, t)
+            .on_hover_text("Hide/show every panel (F11)").clicked() { actions.push(UiAction::ToggleZen); }
     });
     theme::ribbon_group(ui, "Zoom", t, |ui| {
         if theme::ribbon_button(ui, Icon::Minus, "Out", true, true, t).clicked() { actions.push(UiAction::SetZoom(state.zoom - 0.1)); }
@@ -843,8 +851,10 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
             UiAction::TogglePanel(i) => match i {
                 0 => session.project.layout.show_left = !session.project.layout.show_left,
                 1 => session.project.layout.show_right = !session.project.layout.show_right,
-                _ => session.project.layout.show_bottom = !session.project.layout.show_bottom,
+                2 => session.project.layout.show_bottom = !session.project.layout.show_bottom,
+                _ => state.show_ribbon = !state.show_ribbon,
             },
+            UiAction::ToggleZen => state.zen = !state.zen,
             UiAction::SetZoom(z) => state.zoom = z.clamp(0.35, 3.0),
             UiAction::ToggleGrid => state.show_grid = !state.show_grid,
             UiAction::ToggleSnap => state.snap = !state.snap,

@@ -20,14 +20,21 @@ pub fn render(ctx: &egui::Context, session: &mut Session, ui: &mut UiState) {
     shortcuts(ctx, session, ui);
 
     let mut actions = Vec::new();
+    let zen = ui.zen;
+    let show_top = ui.show_ribbon && !zen;
+    let show_left = session.project.layout.show_left && !zen;
+    let show_right = session.project.layout.show_right && !zen;
+    let show_bottom = session.project.layout.show_bottom && !zen;
+
     // Panel order matters: the status strip claims the outermost bottom edge first.
-    panels::status_bar(ctx, session, ui, &mut actions);
-    panels::ribbon(ctx, session, ui, &mut actions);
-    if session.project.layout.show_bottom { panels::bottom_panel(ctx, session, ui, &mut actions); }
-    if session.project.layout.show_left { panels::left_panel(ctx, session, ui, &mut actions); }
-    if session.project.layout.show_right { panels::right_panel(ctx, session, ui, &mut actions); }
+    if !zen { panels::status_bar(ctx, session, ui, &mut actions); }
+    if show_top { panels::ribbon(ctx, session, ui, &mut actions); }
+    if show_bottom { panels::bottom_panel(ctx, session, ui, &mut actions); }
+    if show_left { panels::left_panel(ctx, session, ui, &mut actions); }
+    if show_right { panels::right_panel(ctx, session, ui, &mut actions); }
     canvas::show(ctx, session, ui, &mut actions);
     palette::show(ctx, ui, &mut actions);
+
 
     panels::apply_actions(ctx, session, ui, actions);
 
@@ -56,6 +63,11 @@ fn shortcuts(ctx: &egui::Context, session: &mut Session, ui: &mut UiState) {
         if cmd && input.key_pressed(egui::Key::Plus) { actions.push(UiAction::SetZoom(zoom + 0.1)); }
         if cmd && input.key_pressed(egui::Key::Minus) { actions.push(UiAction::SetZoom(zoom - 0.1)); }
         if cmd && input.key_pressed(egui::Key::Num0) { actions.push(UiAction::ResetView); }
+        if input.key_pressed(egui::Key::F11) { actions.push(UiAction::ToggleZen); }
+        if cmd && input.key_pressed(egui::Key::Num1) { actions.push(UiAction::TogglePanel(0)); }
+        if cmd && input.key_pressed(egui::Key::Num2) { actions.push(UiAction::TogglePanel(2)); }
+        if cmd && input.key_pressed(egui::Key::Num3) { actions.push(UiAction::TogglePanel(1)); }
+        if cmd && input.key_pressed(egui::Key::Num4) { actions.push(UiAction::TogglePanel(3)); }
         if input.key_pressed(egui::Key::F5) { actions.push(UiAction::Recalculate); }
         if input.key_pressed(egui::Key::Escape) {
             match editing { Some(id) => actions.push(UiAction::Edit(id, false)), None => actions.push(UiAction::Cancel) }

@@ -45,6 +45,9 @@ pub struct UiState {
     pub dock_height: f32,
     pub left_width: f32,
     pub right_width: f32,
+    /// Ribbon visibility (session state) and one-key focus mode.
+    pub show_ribbon: bool,
+    pub zen: bool,
     pub drag: Option<Drag>,
     pub press: Option<Pos2>,
     pub moved: bool,
@@ -63,6 +66,8 @@ impl Default for UiState {
             dock_height: 186.0,
             left_width: 236.0,
             right_width: 292.0,
+            show_ribbon: true,
+            zen: false,
             drag: None, press: None, moved: false,
         }
     }
@@ -94,6 +99,7 @@ pub enum UiAction {
     SetTheme(String),
     SetAllowUserCode(bool),
     TogglePanel(u8),
+    ToggleZen,
     SetZoom(f32),
     ToggleGrid,
     ToggleSnap,

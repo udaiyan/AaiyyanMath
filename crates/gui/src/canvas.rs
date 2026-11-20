@@ -101,10 +101,13 @@ pub fn show(ctx: &egui::Context, session: &mut Session, state: &mut UiState, act
         }
 
         interact(ctx, state, actions, &hits, view, origin, zoom);
-        splits(ui, ctx, state, view, &t,
-            session.project.layout.show_left,
-            session.project.layout.show_right,
-            session.project.layout.show_bottom);
+        let zen = state.zen;
+        let show_top = state.show_ribbon && !zen;
+        let show_left = session.project.layout.show_left && !zen;
+        let show_right = session.project.layout.show_right && !zen;
+        let show_bottom = session.project.layout.show_bottom && !zen;
+        splits(ui, ctx, state, actions, view, &t, show_left, show_right, show_bottom, show_top);
+        chrome_bar(ui, actions, state, view, &t, show_top, show_left, show_right, show_bottom);
 
         if let Some(c) = state.cursor {
             if state.editing.is_none() {
@@ -154,9 +157,10 @@ fn empty_state(ui: &mut Ui, view: Rect, t: &Theme) {
 fn interact(ctx: &egui::Context, state: &mut UiState, actions: &mut Vec<UiAction>, hits: &[Hit], view: Rect, origin: Pos2, zoom: f32) {
     let Some(p) = ctx.pointer_interact_pos() else { return };
     let over_palette = state.palette_rect.map(|r| r.expand(4.0).contains(p)).unwrap_or(false);
-    let near_split = (p.x - view.left()) < 8.0
-        || (view.right() - p.x) < 8.0
-        || (view.bottom() - p.y) < 8.0;
+    let near_split = (p.x - view.left()) < 20.0
+        || (view.right() - p.x) < 20.0
+        || (view.bottom() - p.y) < 20.0
+        || (p.y - view.top()) < 20.0;
     if !view.contains(p) || over_palette || near_split || ctx.is_using_pointer() {
         if ctx.input(|i| i.pointer.primary_released()) { state.drag = None; state.press = None; state.moved = false; }
         return;
@@ -235,8 +239,7 @@ fn region(
     if anim > 0.001 && anim < 0.999 { ctx.request_repaint(); }
     {
         let p = ui.painter();
-        let base = t.card;
-        p.rect_filled(card_rect, 4.0, base);
+        p.rect_filled(card_rect, 4.0, t.card);
         let edge = if editing { t.accent } else if selected { t.accent_line } else { t.card_edge };
         p.rect_stroke(card_rect, 4.0, Stroke::new(if editing { 1.4_f32 } else { 1.0_f32 }, edge));
         if anim > 0.01 {
@@ -446,10 +449,6 @@ fn region(
 }
 
 
-// ---------------------------------------------------------------------------
-// Panel splits. Sizes live in UiState and the handles are drawn at the canvas
-// edges, so resizing never depends on egui panel state or fights the canvas pan.
-// ---------------------------------------------------------------------------
 fn split_band(
     ui: &mut Ui,
     ctx: &egui::Context,
@@ -471,24 +470,16 @@ fn split_band(
         });
     }
     let line_col = if active { t.accent_line } else { t.ribbon_edge };
-    let grip_col = if active { t.accent } else { t.ink_faint };
-    let c = rect.center();
     if vertical {
         painter.line_segment(
             [Pos2::new(rect.left(), rect.bottom() - 0.5), Pos2::new(rect.right(), rect.bottom() - 0.5)],
             Stroke::new(1.0_f32, line_col),
         );
-        for k in -1..=1 {
-            painter.circle_filled(Pos2::new(c.x + k as f32 * 5.0, c.y), 1.2_f32, grip_col);
-        }
     } else {
         painter.line_segment(
             [Pos2::new(rect.center().x, rect.top()), Pos2::new(rect.center().x, rect.bottom())],
             Stroke::new(1.0_f32, line_col),
         );
-        for k in -1..=1 {
-            painter.circle_filled(Pos2::new(c.x, c.y + k as f32 * 5.0), 1.2_f32, grip_col);
-        }
     }
     (resp.drag_delta(), resp.double_clicked())
 }
@@ -498,17 +489,20 @@ fn splits(
     ui: &mut Ui,
     ctx: &egui::Context,
     state: &mut UiState,
+    actions: &mut Vec<UiAction>,
     view: Rect,
     t: &Theme,
     show_left: bool,
     show_right: bool,
     show_bottom: bool,
+    show_top: bool,
 ) {
     let band = 7.0_f32;
 
+    // ---- output dock (bottom edge) ----
     if show_bottom {
         let r = Rect::from_min_max(Pos2::new(view.left(), view.bottom() - band), view.right_bottom());
-        let tip = format!("Output dock  {:.0} px\ndrag to resize · double-click to toggle", state.dock_height);
+        let tip = format!("Output dock  {:.0} px\ndrag to resize · double-click to toggle size", state.dock_height);
         let (d, dbl) = split_band(ui, ctx, r, egui::Id::new("split.bottom"), true, &tip, t);
         if d != Vec2::ZERO {
             state.dock_height = (state.dock_height - d.y).clamp(110.0, 640.0);
@@ -517,7 +511,13 @@ fn splits(
             state.dock_height = if (state.dock_height - 186.0).abs() < 2.0 { 340.0 } else { 186.0 };
         }
     }
+    let tab = Rect::from_center_size(Pos2::new(view.center().x, view.bottom() - 9.0), Vec2::new(46.0, 16.0));
+    let tip = if show_bottom { "Hide output dock  (Ctrl+2)" } else { "Show output dock  (Ctrl+2)" };
+    if restore_tab(ui, tab, egui::Id::new("tab.bottom"), tip, t, true) {
+        actions.push(UiAction::TogglePanel(2));
+    }
 
+    // ---- navigation (left edge) ----
     if show_left {
         let r = Rect::from_min_max(view.left_top(), Pos2::new(view.left() + band, view.bottom()));
         let tip = format!("Navigation  {:.0} px\ndrag to resize · double-click to reset", state.left_width);
@@ -527,7 +527,13 @@ fn splits(
         }
         if dbl { state.left_width = 236.0; }
     }
+    let tab = Rect::from_center_size(Pos2::new(view.left() + 9.0, view.center().y), Vec2::new(16.0, 46.0));
+    let tip = if show_left { "Hide navigation  (Ctrl+1)" } else { "Show navigation  (Ctrl+1)" };
+    if restore_tab(ui, tab, egui::Id::new("tab.left"), tip, t, false) {
+        actions.push(UiAction::TogglePanel(0));
+    }
 
+    // ---- inspector (right edge) ----
     if show_right {
         let r = Rect::from_min_max(Pos2::new(view.right() - band, view.top()), view.right_bottom());
         let tip = format!("Inspector  {:.0} px\ndrag to resize · double-click to reset", state.right_width);
@@ -537,4 +543,126 @@ fn splits(
         }
         if dbl { state.right_width = 292.0; }
     }
+    let tab = Rect::from_center_size(Pos2::new(view.right() - 9.0, view.center().y), Vec2::new(16.0, 46.0));
+    let tip = if show_right { "Hide inspector  (Ctrl+3)" } else { "Show inspector  (Ctrl+3)" };
+    if restore_tab(ui, tab, egui::Id::new("tab.right"), tip, t, false) {
+        actions.push(UiAction::TogglePanel(1));
+    }
+
+    // ---- ribbon (top edge) ----
+    let tab = Rect::from_center_size(Pos2::new(view.center().x, view.top() + 9.0), Vec2::new(46.0, 16.0));
+    let tip = if show_top { "Hide ribbon  (Ctrl+4)" } else { "Show ribbon  (Ctrl+4)" };
+    if restore_tab(ui, tab, egui::Id::new("tab.top"), tip, t, true) {
+        actions.push(UiAction::TogglePanel(3));
+    }
+}
+
+/// Small dotted tab drawn on a canvas edge when its panel is hidden.
+fn restore_tab(ui: &mut Ui, rect: Rect, id: egui::Id, tip: &str, t: &Theme, horizontal: bool) -> bool {
+    let resp = ui.interact(rect, id, egui::Sense::click()).on_hover_text(tip);
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4.0, if resp.hovered() { t.accent_soft } else { t.ribbon });
+    painter.rect_stroke(
+        rect, 4.0,
+        Stroke::new(1.0_f32, if resp.hovered() { t.accent_line } else { t.ribbon_edge }),
+    );
+    let c = rect.center();
+    let col = if resp.hovered() { t.accent } else { t.ink_faint };
+    for k in -1..=1 {
+        let p = if horizontal {
+            Pos2::new(c.x + k as f32 * 5.0, c.y)
+        } else {
+            Pos2::new(c.x, c.y + k as f32 * 5.0)
+        };
+        painter.circle_filled(p, 1.2_f32, col);
+    }
+    if resp.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand); }
+    resp.clicked()
+}
+
+
+// ---------------------------------------------------------------------------
+// Chrome pill: the View-tab checkboxes, available directly on the workspace.
+// ---------------------------------------------------------------------------
+#[allow(clippy::too_many_arguments)]
+fn chrome_bar(
+    ui: &mut Ui,
+    actions: &mut Vec<UiAction>,
+    state: &UiState,
+    view: Rect,
+    t: &Theme,
+    show_top: bool,
+    show_left: bool,
+    show_right: bool,
+    show_bottom: bool,
+) {
+    let items: [(Icon, bool, u8, &str); 4] = [
+        (Icon::Equals, show_top, 3, "Ribbon  (Ctrl+4)"),
+        (Icon::Text, show_left, 0, "Navigation  (Ctrl+1)"),
+        (Icon::Info, show_right, 1, "Inspector  (Ctrl+3)"),
+        (Icon::Table, show_bottom, 2, "Output dock  (Ctrl+2)"),
+    ];
+    let bw = 26.0_f32;
+    let h = 26.0_f32;
+    let w = bw * 5.0 + 16.0;
+    let outer = Rect::from_min_size(
+        Pos2::new(view.right() - w - 10.0, view.top() + 8.0),
+        Vec2::new(w, h),
+    );
+    let p = ui.painter_at(outer);
+    p.rect_filled(outer, 6.0, t.page.linear_multiply(0.92));
+    p.rect_stroke(outer, 6.0, Stroke::new(1.0_f32, t.hairline));
+
+    for (i, (icon, active, idx, tip)) in items.iter().enumerate() {
+        let r = Rect::from_min_size(
+            Pos2::new(outer.left() + 5.0 + i as f32 * bw, outer.top() + 2.0),
+            Vec2::new(bw - 2.0, h - 4.0),
+        );
+        let resp = ui
+            .interact(r, egui::Id::new(("chrome", *idx)), egui::Sense::click())
+            .on_hover_text(*tip);
+        let pp = ui.painter_at(r);
+        if *active {
+            pp.rect_filled(r, 4.0, t.accent_soft);
+            pp.rect_stroke(r, 4.0, Stroke::new(1.0_f32, t.accent_line));
+        } else if resp.hovered() {
+            pp.rect_filled(r, 4.0, t.faint_hover());
+        }
+        theme::paint_icon(
+            &pp,
+            Rect::from_center_size(r.center(), Vec2::splat(15.0)),
+            *icon,
+            if *active { t.accent } else { t.ink_faint },
+        );
+        if resp.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand); }
+        if resp.clicked() { actions.push(UiAction::TogglePanel(*idx)); }
+    }
+
+    let sep_x = outer.left() + 5.0 + 4.0 * bw + 1.0;
+    ui.painter_at(outer).line_segment(
+        [Pos2::new(sep_x, outer.top() + 5.0), Pos2::new(sep_x, outer.bottom() - 5.0)],
+        Stroke::new(1.0_f32, t.hairline),
+    );
+
+    let r = Rect::from_min_size(
+        Pos2::new(sep_x + 3.0, outer.top() + 2.0),
+        Vec2::new(bw - 2.0, h - 4.0),
+    );
+    let resp = ui
+        .interact(r, egui::Id::new("chrome.zen"), egui::Sense::click())
+        .on_hover_text("Focus mode — hide/show every panel  (F11)");
+    let pp = ui.painter_at(r);
+    if state.zen {
+        pp.rect_filled(r, 4.0, t.accent);
+    } else if resp.hovered() {
+        pp.rect_filled(r, 4.0, t.faint_hover());
+    }
+    theme::paint_icon(
+        &pp,
+        Rect::from_center_size(r.center(), Vec2::splat(15.0)),
+        Icon::Zoom,
+        if state.zen { Color32::WHITE } else { t.ink_soft },
+    );
+    if resp.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand); }
+    if resp.clicked() { actions.push(UiAction::ToggleZen); }
 }
