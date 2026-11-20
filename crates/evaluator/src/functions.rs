@@ -197,6 +197,8 @@ pub const CATALOG: &[Spec] = &[
     Spec { name: "struct", class: Class::Structured, python: P, arity: 0, doc: "structure" },
     Spec { name: "table", class: Class::Structured, python: P, arity: 2, doc: "mixed-data table" },
     // -- reductions with dimension argument --
+    Spec { name: "sumrange", class: Class::Array, python: P, arity: 3, doc: "sum of f(k) for k = lo..hi" },
+    Spec { name: "prodrange", class: Class::Array, python: P, arity: 3, doc: "product of f(k) for k = lo..hi" },
     Spec { name: "sum", class: Class::Array, python: N, arity: 2, doc: "sum (optionally along dim)" },
     Spec { name: "prod", class: Class::Array, python: N, arity: 2, doc: "product" },
     Spec { name: "max", class: Class::Array, python: N, arity: 2, doc: "maximum" },

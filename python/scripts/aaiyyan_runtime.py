@@ -793,6 +793,8 @@ _MCALL = {
     'cell': list,
     'struct': dict,
     'table': lambda cols, names=None: __import__('pandas').DataFrame({(names[i] if names else 'Var' + str(i + 1)): c for i, c in enumerate(cols)}),
+    'sumrange': lambda lo, hi, f: sum((f(k) if callable(f) else f) for k in range(int(lo), int(hi) + 1)),
+    'prodrange': lambda lo, hi, f: __import__('math').prod((f(k) if callable(f) else f) for k in range(int(lo), int(hi) + 1)),
     'sum': lambda a, dim=None: _N().sum(a, axis=None if dim is None else int(dim) - 1),
     'prod': lambda a, dim=None: _N().prod(a, axis=None if dim is None else int(dim) - 1),
     'max': lambda a, dim=None: _N().max(a, axis=None if dim is None else int(dim) - 1),

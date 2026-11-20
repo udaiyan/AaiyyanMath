@@ -155,11 +155,13 @@ fn math_tab(ui: &mut Ui, state: &mut UiState, actions: &mut Vec<UiAction>, t: &T
         }
     });
     theme::ribbon_group(ui, "Quick insert", t, |ui| {
-        for (ic, label, snip) in [
-            (Icon::Root, "Root", "sqrt("), (Icon::Integral, "Integral", "integrate(f, 0, 1)"),
-            (Icon::Matrix, "Matrix", "[[1, 2], [3, 4]]"), (Icon::Sigma, "Sum", "sum(v)"),
+        for (ic, label, kind) in [
+            (Icon::Root, "Root", crate::template::Make::Sqrt),
+            (Icon::Integral, "Integral", crate::template::Make::Integral),
+            (Icon::Matrix, "Matrix", crate::template::Make::Matrix2),
+            (Icon::Sigma, "Sum", crate::template::Make::Sum),
         ] {
-            if theme::ribbon_button(ui, ic, label, true, true, t).clicked() { actions.push(UiAction::InsertSnippet(snip.into())); }
+            if theme::ribbon_button(ui, ic, label, true, true, t).clicked() { actions.push(UiAction::TemplateNew(kind)); }
         }
     });
 }
@@ -855,6 +857,54 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
                 _ => state.show_ribbon = !state.show_ribbon,
             },
             UiAction::ToggleZen => state.zen = !state.zen,
+            UiAction::TemplateNew(m) => {
+                let (x, y) = drop_point(state);
+                crate::template::insert_make(state, session, m, (x, y));
+            }
+            UiAction::TemplateMake(m, bid, slot) => {
+                state.focused_slot = Some((bid, slot));
+                let (x, y) = drop_point(state);
+                crate::template::insert_make(state, session, m, (x, y));
+            }
+            UiAction::TemplateLeaf(text, unit) => {
+                let (x, y) = drop_point(state);
+                crate::template::insert_leaf(state, session, &text, unit, (x, y));
+            }
+            UiAction::TemplateFocus(bid, slot) => {
+                state.selected = Some(bid); state.editing = None; state.cursor = None;
+                state.focused_slot = Some((bid, slot));
+                state.slot_focus = Some((bid, slot));
+                state.slot_buffer.clear();
+            }
+            UiAction::TemplateNextSlot(bid) => {
+                state.focused_slot = crate::template::next_slot(state, bid).map(|s| (bid, s));
+                state.slot_buffer.clear();
+            }
+            UiAction::TemplateCommitSlot(bid, slot) => {
+                let buf = state.slot_buffer.trim().to_string();
+                if !buf.is_empty() {
+                    if let Some(mut tp) = state.templates.get(&bid).cloned() {
+                        let leaf = if buf.chars().any(|c| c.is_ascii_digit()) { crate::template::Tpl::Num(buf) } else { crate::template::Tpl::Sym(buf) };
+                        tp.fill(slot, leaf);
+                        state.templates.insert(bid, tp);
+                        crate::template::sync(session, state, bid);
+                    }
+                }
+                state.slot_buffer.clear();
+            }
+            UiAction::SetBlockWidth(id, dx) => {
+                let cur = state.widths.get(&id).copied().unwrap_or(crate::canvas::REGION_W);
+                state.widths.insert(id, (cur + dx).clamp(90.0, 2400.0));
+            }
+            UiAction::FitBlockWidth(id) => { state.widths.remove(&id); }
+            UiAction::TemplateClearSlot(bid, slot) => {
+                if let Some(mut tp) = state.templates.get(&bid).cloned() {
+                    tp.fill(slot, crate::template::Tpl::Hole(slot));
+                    state.templates.insert(bid, tp);
+                    crate::template::sync(session, state, bid);
+                }
+                state.slot_buffer.clear();
+            }
             UiAction::SetZoom(z) => state.zoom = z.clamp(0.35, 3.0),
             UiAction::ToggleGrid => state.show_grid = !state.show_grid,
             UiAction::ToggleSnap => state.snap = !state.snap,

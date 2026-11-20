@@ -14,7 +14,7 @@ impl Default for View3d {
 impl View3d { pub fn new() -> View3d { View3d::default() } }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Drag { Pan, Move(Uuid) }
+pub enum Drag { Pan, Move(Uuid), Resize(Uuid) }
 
 pub const RIBBON_TABS: &[&str] = &["Math", "Plots", "Matrices", "Functions", "Calculation", "Document", "View"];
 pub const PALETTES: &[&str] = &["Operators", "Symbols", "Constants", "Programming", "Units", "Functions"];
@@ -48,6 +48,15 @@ pub struct UiState {
     /// Ribbon visibility (session state) and one-key focus mode.
     pub show_ribbon: bool,
     pub zen: bool,
+    /// Structured math objects keyed by region, plus the active slot.
+    pub templates: std::collections::HashMap<uuid::Uuid, crate::template::Tpl>,
+    pub focused_slot: Option<(uuid::Uuid, u32)>,
+    pub slot_buffer: String,
+    pub slot_focus: Option<(uuid::Uuid, u32)>,
+    pub slot_hits: Vec<(uuid::Uuid, u32, egui::Rect)>,
+    pub math_size: f32,
+    /// Fixed region widths in world units; absent = auto-fit.
+    pub widths: std::collections::HashMap<uuid::Uuid, f32>,
     pub drag: Option<Drag>,
     pub press: Option<Pos2>,
     pub moved: bool,
@@ -68,6 +77,13 @@ impl Default for UiState {
             right_width: 292.0,
             show_ribbon: true,
             zen: false,
+            templates: std::collections::HashMap::new(),
+            focused_slot: None,
+            slot_buffer: String::new(),
+            slot_focus: None,
+            slot_hits: Vec::new(),
+            math_size: 20.0,
+            widths: std::collections::HashMap::new(),
             drag: None, press: None, moved: false,
         }
     }
@@ -100,6 +116,15 @@ pub enum UiAction {
     SetAllowUserCode(bool),
     TogglePanel(u8),
     ToggleZen,
+    TemplateNew(crate::template::Make),
+    TemplateMake(crate::template::Make, uuid::Uuid, u32),
+    TemplateLeaf(String, bool),
+    TemplateFocus(uuid::Uuid, u32),
+    TemplateNextSlot(uuid::Uuid),
+    TemplateCommitSlot(uuid::Uuid, u32),
+    TemplateClearSlot(uuid::Uuid, u32),
+    SetBlockWidth(uuid::Uuid, f32),
+    FitBlockWidth(uuid::Uuid),
     SetZoom(f32),
     ToggleGrid,
     ToggleSnap,

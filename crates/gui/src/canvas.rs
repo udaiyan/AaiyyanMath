@@ -10,13 +10,13 @@ use egui::{Color32, Pos2, Rect, Stroke, Ui, Vec2};
 use uuid::Uuid;
 
 pub const GRID: f32 = 12.0;
-const REGION_W: f32 = 440.0;
+pub const REGION_W: f32 = 440.0;
 const DRAG_THRESHOLD: f32 = 4.0;
 const CARD_PAD: f32 = 7.0;
 
 pub fn snap(v: f32, on: bool) -> f32 { if on { (v / GRID).round() * GRID } else { v } }
 
-struct Hit { id: Uuid, rect: Rect, grip: Option<Rect>, tools: Option<Rect>, editable: bool }
+struct Hit { id: Uuid, rect: Rect, grip: Option<Rect>, tools: Option<Rect>, resize: Option<Rect>, editable: bool }
 
 fn is_editable(kind: &BlockKind) -> bool {
     matches!(kind, BlockKind::Equation { .. } | BlockKind::Result { .. } | BlockKind::Text { .. } | BlockKind::Heading { .. })
@@ -95,6 +95,7 @@ pub fn show(ctx: &egui::Context, session: &mut Session, state: &mut UiState, act
 
         if ws.blocks.is_empty() { empty_state(ui, view, &t); }
 
+        state.slot_hits.clear();
         let mut hits: Vec<Hit> = Vec::new();
         for block in &ws.blocks {
             if let Some(h) = region(ui, ctx, session, state, block, actions, &t, origin, zoom) { hits.push(h); }
@@ -108,6 +109,15 @@ pub fn show(ctx: &egui::Context, session: &mut Session, state: &mut UiState, act
         let show_bottom = session.project.layout.show_bottom && !zen;
         splits(ui, ctx, state, actions, view, &t, show_left, show_right, show_bottom, show_top);
         chrome_bar(ui, actions, state, view, &t, show_top, show_left, show_right, show_bottom);
+        if state.selected.map(|id| state.templates.contains_key(&id)).unwrap_or(false) {
+            let bar = Rect::from_min_size(view.left_bottom() + Vec2::new(10.0, -46.0), Vec2::new(view.width() - 20.0, 36.0));
+            ui.allocate_ui_at_rect(bar, |tu| {
+                egui::Frame::none().fill(t.card).stroke(Stroke::new(1.0_f32, t.card_edge)).rounding(6.0)
+                    .inner_margin(egui::Margin::symmetric(9.0, 5.0)).show(tu, |tu| {
+                        crate::template::toolbar(tu, state, session, actions, &t);
+                    });
+            });
+        }
 
         if let Some(c) = state.cursor {
             if state.editing.is_none() {
@@ -133,9 +143,12 @@ pub fn show(ctx: &egui::Context, session: &mut Session, state: &mut UiState, act
             format!("{}   ·   {} regions   ·   {:.0}%", ws.name, ws.blocks.len(), zoom * 100.0),
             egui::FontId::proportional(10.5), t.ink_faint);
 
+        let toolbar_up = state.selected.map(|id| state.templates.contains_key(&id)).unwrap_or(false);
+        if !toolbar_up {
         ui.painter().text(view.right_bottom() - Vec2::new(12.0, 9.0), egui::Align2::RIGHT_BOTTOM,
             "click region: edit  ·  click grid: insert  ·  grip / alt-drag: move  ·  ctrl+wheel: zoom",
             egui::FontId::proportional(10.0), t.ink_faint);
+        }
     });
 }
 
@@ -169,17 +182,31 @@ fn interact(ctx: &egui::Context, state: &mut UiState, actions: &mut Vec<UiAction
         i.pointer.primary_pressed(), i.pointer.primary_released(), i.pointer.primary_down(),
         i.pointer.button_down(egui::PointerButton::Middle), i.modifiers.alt, i.pointer.delta(),
     ));
+    if ctx.input(|i| i.pointer.any_click()) {
+        if let Some((bid, slot, _)) = state.slot_hits.iter().rev().find(|(_, _, r)| r.expand(2.0).contains(p)).cloned() {
+            actions.push(UiAction::TemplateFocus(bid, slot));
+            state.drag = None; state.press = None; state.moved = false;
+            return;
+        }
+    }
     let top = |pred: &dyn Fn(&Hit) -> bool| hits.iter().rev().find(|h| pred(h)).map(|h| h.id);
     let hit_region = top(&|h| h.rect.contains(p));
     let hit_grip = top(&|h| h.grip.map(|g| g.contains(p)).unwrap_or(false));
     let hit_tools = top(&|h| h.tools.map(|g| g.contains(p)).unwrap_or(false));
+    let hit_resize = top(&|h| h.resize.map(|g| g.contains(p)).unwrap_or(false));
 
     if middle && down { state.pan -= delta; state.drag = None; state.press = None; return; }
 
     if pressed {
         state.press = Some(p);
         state.moved = false;
-        if let Some(id) = hit_grip { state.drag = Some(Drag::Move(id)); }
+        if let Some(id) = hit_resize {
+            if let Some(h) = hits.iter().find(|h| h.id == id) {
+                state.widths.entry(id).or_insert(h.rect.width() / zoom);
+            }
+            state.drag = Some(Drag::Resize(id));
+        }
+        else if let Some(id) = hit_grip { state.drag = Some(Drag::Move(id)); }
         else if alt { if let Some(id) = hit_region { state.drag = Some(Drag::Move(id)); } }
         else if hit_region.is_none() && hit_tools.is_none() { state.drag = Some(Drag::Pan); }
         else { state.drag = None; }
@@ -190,6 +217,7 @@ fn interact(ctx: &egui::Context, state: &mut UiState, actions: &mut Vec<UiAction
             match state.drag {
                 Some(Drag::Pan) => state.pan -= delta,
                 Some(Drag::Move(id)) => { let d = delta / zoom; actions.push(UiAction::SetBlockPosDelta(id, d.x, d.y)); }
+                Some(Drag::Resize(id)) => { actions.push(UiAction::SetBlockWidth(id, delta.x / zoom)); }
                 None => {}
             }
         }
@@ -197,10 +225,14 @@ fn interact(ctx: &egui::Context, state: &mut UiState, actions: &mut Vec<UiAction
     if released {
         if !state.moved {
             if hit_tools.is_some() {
+            } else if let Some(id) = hit_resize {
+                actions.push(UiAction::Select(id));
             } else if let Some(id) = hit_grip {
                 actions.push(UiAction::Select(id));
             } else if let Some(id) = hit_region {
-                if state.editing != Some(id) {
+                if state.templates.contains_key(&id) {
+                    actions.push(UiAction::Select(id));
+                } else if state.editing != Some(id) {
                     actions.push(UiAction::Select(id));
                     if hits.iter().find(|h| h.id == id).map(|h| h.editable).unwrap_or(false) {
                         actions.push(UiAction::Edit(id, true));
@@ -228,13 +260,17 @@ fn region(
     let editing = state.editing == Some(block.id);
     let hovered = state.hovered == Some(block.id);
     let pos = origin + Vec2::new(block.x, block.y) * zoom - state.pan;
-    let width = REGION_W * zoom;
+
+    // Width is auto (hugs the maths, one line) until the viewer drags the handle.
+    let fixed_w = state.widths.get(&block.id).copied();
+    let world_w = fixed_w.unwrap_or(REGION_W);
+    let width = world_w * zoom;
     let max_rect = Rect::from_min_size(pos, Vec2::new(width, 4000.0));
     if !max_rect.intersects(ui.clip_rect()) { return None; }
 
-    // Anchored card, painted beneath the content using last frame's measured size.
-    let prev = state.sizes.get(&block.id).copied().unwrap_or(Vec2::new(width / zoom, 26.0)) * zoom;
-    let card_rect = Rect::from_min_size(pos, prev).expand(CARD_PAD);
+    let prev = state.sizes.get(&block.id).copied().unwrap_or(Vec2::new(120.0, 26.0)) * zoom;
+    let card_w = match fixed_w { Some(_) => width, None => prev.x.max(56.0 * zoom) };
+    let card_rect = Rect::from_min_size(pos, Vec2::new(card_w, prev.y)).expand(CARD_PAD);
     let anim = ctx.animate_bool_with_time(egui::Id::new(("card", block.id)), hovered || selected || editing, 0.12);
     if anim > 0.001 && anim < 0.999 { ctx.request_repaint(); }
     {
@@ -252,13 +288,33 @@ fn region(
         if !block.enabled { p.rect_filled(card_rect, 4.0, t.page.linear_multiply(0.55)); }
     }
 
-    let math_size = 18.5 * zoom;
+    let math_size = state.math_size * zoom;
     let inner = ui.allocate_ui_at_rect(max_rect, |ui| {
         ui.set_max_width(width);
         ui.spacing_mut().item_spacing.y = 3.0 * zoom;
         match &block.kind {
             BlockKind::Equation { source } | BlockKind::Result { source } => {
-                if editing {
+                crate::template::ensure(state, block.id, source);
+                if state.templates.contains_key(&block.id) {
+                    // Expression and its value share one baseline row.
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 7.0 * zoom;
+                        if let Some(painted) = crate::template::paint(ui, state, block.id, t, math_size) {
+                            for (slot, r) in &painted.slots { state.slot_hits.push((block.id, *slot, *r)); }
+                            crate::template::slot_editor(ui, ctx, state, session, block.id, t, math_size, &painted.slots);
+                            let complete = state.templates.get(&block.id).map(|x| x.complete()).unwrap_or(false);
+                            if complete {
+                                let vals = session.values_for(block.id).to_vec();
+                                let shown = vals.iter().find(|(n, _)| n == "_")
+                                    .or_else(|| vals.first());
+                                if let Some((_, v)) = shown {
+                                    ui.label(egui::RichText::new("=").font(theme::math(math_size)).color(t.ink_soft));
+                                    ui.label(egui::RichText::new(v.display()).font(theme::math(math_size)).strong().color(t.ink));
+                                }
+                            }
+                        }
+                    });
+                } else if editing {
                     let mut text = source.replace('\n', "; ");
                     let resp = ui.add(egui::TextEdit::singleline(&mut text)
                         .id(egui::Id::new(("eq", block.id)))
@@ -293,15 +349,21 @@ fn region(
                         math_render::show(ui, &math_render::definition_node(stmt, value, echo), math_size);
                     }
                 }
-                for err in session.errors_for(block.id) {
-                    ui.add_space(2.0);
-                    ui.horizontal(|ui| {
-                        theme::icon(ui, Icon::Info, 12.0, t.danger);
-                        ui.label(egui::RichText::new(err).size(11.0 * zoom).color(t.danger));
-                    });
-                    if err.contains("undefined symbol") {
-                        let name = err.split("'").nth(1).unwrap_or("x");
-                        ui.label(egui::RichText::new(format!("define it first:  {name} := 1.5")).size(10.0 * zoom).color(t.ink_faint));
+                let complete = state.templates.get(&block.id).map(|x| x.complete()).unwrap_or(true);
+                if complete {
+                    for err in session.errors_for(block.id) {
+                        ui.add_space(2.0);
+                        let friendly = if err.contains("scalar is not callable") {
+                            "the integrand must be a function of x — try x^2 or sin(x)".to_string()
+                        } else { err.clone() };
+                        ui.horizontal(|ui| {
+                            theme::icon(ui, Icon::Info, 12.0, t.danger);
+                            ui.label(egui::RichText::new(friendly).size(11.0 * zoom).color(t.danger));
+                        });
+                        if err.contains("undefined symbol") {
+                            let name = err.split("'").nth(1).unwrap_or("x");
+                            ui.label(egui::RichText::new(format!("define it first:  {name} := 1.5")).size(10.0 * zoom).color(t.ink_faint));
+                        }
                     }
                 }
             }
@@ -331,7 +393,7 @@ fn region(
                     if state.focus_request == Some(block.id) { r.request_focus(); }
                     if r.changed() { actions.push(UiAction::UpdateSource(block.id, s)); }
                 } else {
-                    ui.label(egui::RichText::new(text).size(13.0 * zoom).color(t.ink_soft));
+                    ui.add(egui::Label::new(egui::RichText::new(text).size(13.0 * zoom).color(t.ink_soft)).wrap());
                 }
             }
             BlockKind::Python { source, trusted } => {
@@ -405,9 +467,10 @@ fn region(
     state.sizes.insert(block.id, used.size() / zoom);
     state.focus_request = state.focus_request.filter(|id| *id != block.id);
 
-    let box_rect = used.expand(CARD_PAD);
+    let box_rect = Rect::from_min_size(pos, Vec2::new(card_w, used.size().y)).expand(CARD_PAD);
     let mut grip = None;
     let mut tools = None;
+    let mut resize = None;
 
     if selected || editing || hovered {
         let g = Rect::from_min_size(Pos2::new(box_rect.left() - 15.0, box_rect.top()), Vec2::new(12.0, box_rect.height().max(18.0)));
@@ -418,8 +481,25 @@ fn region(
         } }
         grip = Some(g);
 
+        // Width handle straddling the right edge of the card.
+        let rz = Rect::from_min_max(
+            Pos2::new(box_rect.right() - 2.0, box_rect.top()),
+            Pos2::new(box_rect.right() + 6.0, box_rect.bottom()),
+        );
+        let hot = ctx.pointer_interact_pos().map(|p| rz.contains(p)).unwrap_or(false)
+            || state.drag == Some(Drag::Resize(block.id));
+        let rp = ui.painter_at(rz);
+        if hot { rp.rect_filled(rz, 3.0, t.accent_soft); }
+        let col = if hot { t.accent } else { t.accent_line };
+        rp.line_segment([Pos2::new(rz.center().x, rz.top() + 2.0), Pos2::new(rz.center().x, rz.bottom() - 2.0)],
+            Stroke::new(if hot { 2.0_f32 } else { 1.2_f32 }, col));
+        for k in -1..=1 {
+            rp.circle_filled(Pos2::new(rz.center().x, rz.center().y + k as f32 * 5.0), 1.2_f32, col);
+        }
+        resize = Some(rz);
+
         if selected || editing {
-            let tr = Rect::from_min_size(Pos2::new(box_rect.right() + 5.0, box_rect.top()), Vec2::new(28.0, 82.0));
+            let tr = Rect::from_min_size(Pos2::new(box_rect.right() + 13.0, box_rect.top()), Vec2::new(28.0, 106.0));
             let tp = ui.painter_at(tr);
             tp.rect_filled(tr, 4.0, t.card);
             tp.rect_stroke(tr, 4.0, Stroke::new(1.0_f32, t.card_edge));
@@ -428,6 +508,9 @@ fn region(
                 if theme::ribbon_button(tu, if editing { Icon::Check } else { Icon::Pencil }, "", false, true, t)
                     .on_hover_text(if editing { "Finish editing (Esc)" } else { "Edit region" }).clicked()
                 { actions.push(UiAction::Edit(block.id, !editing)); }
+                if theme::ribbon_button(tu, Icon::Equals, "", false, true, t)
+                    .on_hover_text("Auto-fit width — keep the equation on one line").clicked()
+                { actions.push(UiAction::FitBlockWidth(block.id)); }
                 if theme::ribbon_button(tu, Icon::Trash, "", false, true, t).on_hover_text("Delete region").clicked() {
                     actions.push(UiAction::Delete(block.id));
                 }
@@ -445,7 +528,7 @@ fn region(
             "disabled", egui::FontId::proportional(9.5), t.warn);
     }
 
-    Some(Hit { id: block.id, rect: box_rect, grip, tools, editable: is_editable(&block.kind) })
+    Some(Hit { id: block.id, rect: box_rect, grip, tools, resize, editable: is_editable(&block.kind) })
 }
 
 
@@ -665,4 +748,9 @@ fn chrome_bar(
     );
     if resp.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand); }
     if resp.clicked() { actions.push(UiAction::ToggleZen); }
+}
+
+
+fn painter_caret(p: &egui::Painter, at: Pos2, h: f32, t: &Theme) {
+    p.line_segment([at - Vec2::new(0.0, h * 0.5), at + Vec2::new(0.0, h * 0.5)], Stroke::new(1.4_f32, t.accent));
 }

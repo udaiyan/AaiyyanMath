@@ -6,6 +6,7 @@ pub mod palette;
 pub mod panels;
 pub mod plots;
 pub mod state;
+pub mod template;
 pub mod theme;
 
 pub use state::{UiAction, UiState};
@@ -72,7 +73,7 @@ fn shortcuts(ctx: &egui::Context, session: &mut Session, ui: &mut UiState) {
         if input.key_pressed(egui::Key::Escape) {
             match editing { Some(id) => actions.push(UiAction::Edit(id, false)), None => actions.push(UiAction::Cancel) }
         }
-        if idle && editing.is_none() {
+        if idle && editing.is_none() && ui.focused_slot.is_none() {
             if input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace) {
                 if let Some(id) = ui.selected { actions.push(UiAction::Delete(id)); }
             }
