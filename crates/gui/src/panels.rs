@@ -744,6 +744,7 @@ pub fn status_bar(ctx: &egui::Context, session: &mut Session, state: &mut UiStat
 
 // ---------------------------------------------------------------- actions ---
 pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiState, actions: Vec<UiAction>) {
+    crate::template::prune(state, session);
     for action in actions {
         match action {
             UiAction::New => {
@@ -771,13 +772,30 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
             UiAction::Redo => session.redo(),
             UiAction::Recalculate => session.force_recalc(),
             UiAction::Cancel => session.cancel(),
-            UiAction::Select(id) => state.selected = Some(id),
+            UiAction::Select(id) => {
+                state.selected = Some(id);
+                if state.templates.contains_key(&id) { state.studio_open = true; }
+                state.focused_leaf = None; state.leaf_focus = None;
+                if !state.templates.contains_key(&id) {
+                    state.focused_slot = None;
+                    state.slot_focus = None;
+                    state.slot_buffer.clear();
+                }
+            }
             UiAction::Edit(id, on) => {
                 state.selected = Some(id);
                 state.editing = if on { Some(id) } else { None };
-                if on { state.focus_request = Some(id); state.cursor = None; }
+                if on {
+                    state.focus_request = Some(id);
+                    state.cursor = None;
+                    state.focused_slot = None;
+                    state.slot_focus = None;
+                    state.slot_buffer.clear();
+                }
                 else {
                     session.end_edit();
+                    // Re-read what was actually typed; drop any stale structure.
+                    state.templates.remove(&id);
                     let pos = session.worksheet().block(id).map(|b| egui::Vec2::new(b.x, b.y));
                     let size = state.sizes.get(&id).copied();
                     if let (Some(p), Some(s)) = (pos, size) {
@@ -828,6 +846,14 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
             UiAction::Insert(kind) => { let (x, y) = drop_point(state); session.insert_block_at(kind, x, y); }
             UiAction::Delete(id) => {
                 session.remove_block(id);
+                state.templates.remove(&id);
+                state.widths.remove(&id);
+                state.sizes.remove(&id);
+                if state.focused_slot.map(|(b, _)| b == id).unwrap_or(false) {
+                    state.focused_slot = None;
+                    state.slot_focus = None;
+                    state.slot_buffer.clear();
+                }
                 if state.selected == Some(id) { state.selected = None; }
                 if state.editing == Some(id) { state.editing = None; }
             }
@@ -844,8 +870,8 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
                 };
                 session.update_block(id, BlockKind::Python { source, trusted: trust });
             }
-            UiAction::AddWorksheet => session.add_worksheet(),
-            UiAction::SelectWorksheet(i) => session.select_worksheet(i),
+            UiAction::AddWorksheet => { session.add_worksheet(); reset_sheet_state(state); }
+            UiAction::SelectWorksheet(i) => { session.select_worksheet(i); reset_sheet_state(state); }
             UiAction::SetMode(mode) => { session.project.settings.mode = mode; if mode == CalcMode::Auto { session.force_recalc(); } }
             UiAction::SetBackend(b) => { session.project.settings.backend = b; session.force_recalc(); }
             UiAction::SetTheme(th) => session.project.layout.theme = th,
@@ -896,7 +922,22 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
                 let cur = state.widths.get(&id).copied().unwrap_or(crate::canvas::REGION_W);
                 state.widths.insert(id, (cur + dx).clamp(90.0, 2400.0));
             }
-            UiAction::FitBlockWidth(id) => { state.widths.remove(&id); }
+            UiAction::FitBlockWidth(id) => { state.widths.remove(&id); state.studio_open = true; }
+            UiAction::TemplateFocusLeaf(bid, path) => {
+                state.selected = Some(bid); state.editing = None; state.cursor = None;
+                state.focused_slot = None; state.slot_focus = None;
+                state.focused_leaf = Some((bid, path.clone()));
+                state.leaf_focus = Some((bid, path));
+                state.leaf_buffer.clear();
+            }
+            UiAction::TemplateCommitLeaf(bid, path) => {
+                let buf = state.leaf_buffer.clone();
+                crate::template::commit_leaf(state, session, bid, &path, &buf);
+                state.focused_leaf = None; state.leaf_buffer.clear();
+            }
+            UiAction::DefineSymbol(name, x, y) => {
+                crate::template::insert_definition(state, session, &name, (x, y));
+            }
             UiAction::TemplateClearSlot(bid, slot) => {
                 if let Some(mut tp) = state.templates.get(&bid).cloned() {
                     tp.fill(slot, crate::template::Tpl::Hole(slot));
@@ -925,6 +966,25 @@ pub fn apply_actions(ctx: &egui::Context, session: &mut Session, state: &mut UiS
         }
     }
     let _ = ctx;
+}
+
+fn reset_sheet_state(state: &mut UiState) {
+    state.templates.clear();
+    state.widths.clear();
+    state.sizes.clear();
+    state.slot_hits.clear();
+    state.focused_slot = None;
+    state.slot_focus = None;
+    state.slot_buffer.clear();
+    state.selected = None;
+    state.editing = None;
+    state.hovered = None;
+    state.focus_request = None;
+    state.drag = None;
+    state.press = None;
+    state.moved = false;
+    state.pan = egui::Vec2::ZERO;
+    state.cursor = Some(egui::Vec2::new(120.0, 96.0));
 }
 
 fn save_dialog() -> Option<PathBuf> {

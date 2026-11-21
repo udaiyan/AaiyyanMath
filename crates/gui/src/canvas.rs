@@ -96,6 +96,7 @@ pub fn show(ctx: &egui::Context, session: &mut Session, state: &mut UiState, act
         if ws.blocks.is_empty() { empty_state(ui, view, &t); }
 
         state.slot_hits.clear();
+        state.leaf_hits.clear();
         let mut hits: Vec<Hit> = Vec::new();
         for block in &ws.blocks {
             if let Some(h) = region(ui, ctx, session, state, block, actions, &t, origin, zoom) { hits.push(h); }
@@ -109,8 +110,9 @@ pub fn show(ctx: &egui::Context, session: &mut Session, state: &mut UiState, act
         let show_bottom = session.project.layout.show_bottom && !zen;
         splits(ui, ctx, state, actions, view, &t, show_left, show_right, show_bottom, show_top);
         chrome_bar(ui, actions, state, view, &t, show_top, show_left, show_right, show_bottom);
-        if state.selected.map(|id| state.templates.contains_key(&id)).unwrap_or(false) {
-            let bar = Rect::from_min_size(view.left_bottom() + Vec2::new(10.0, -46.0), Vec2::new(view.width() - 20.0, 36.0));
+                if state.selected.map(|id| state.templates.contains_key(&id)).unwrap_or(false) {
+            let th = if state.style_open { 96.0 } else { 66.0 };
+            let bar = Rect::from_min_size(view.left_bottom() + Vec2::new(10.0, -(th + 10.0)), Vec2::new(view.width() - 20.0, th));
             ui.allocate_ui_at_rect(bar, |tu| {
                 egui::Frame::none().fill(t.card).stroke(Stroke::new(1.0_f32, t.card_edge)).rounding(6.0)
                     .inner_margin(egui::Margin::symmetric(9.0, 5.0)).show(tu, |tu| {
@@ -183,6 +185,11 @@ fn interact(ctx: &egui::Context, state: &mut UiState, actions: &mut Vec<UiAction
         i.pointer.button_down(egui::PointerButton::Middle), i.modifiers.alt, i.pointer.delta(),
     ));
     if ctx.input(|i| i.pointer.any_click()) {
+        if let Some((bid, path, _)) = state.leaf_hits.iter().rev().find(|(_, _, r)| r.expand(3.0).contains(p)).cloned() {
+            actions.push(UiAction::TemplateFocusLeaf(bid, path));
+            state.drag = None; state.press = None; state.moved = false;
+            return;
+        }
         if let Some((bid, slot, _)) = state.slot_hits.iter().rev().find(|(_, _, r)| r.expand(2.0).contains(p)).cloned() {
             actions.push(UiAction::TemplateFocus(bid, slot));
             state.drag = None; state.press = None; state.moved = false;
@@ -243,12 +250,17 @@ fn interact(ctx: &egui::Context, state: &mut UiState, actions: &mut Vec<UiAction
                 state.cursor = Some(Vec2::new(snap(w.x, state.snap), snap(w.y, state.snap)));
                 state.editing = None;
                 state.selected = None;
+                state.focused_slot = None;
+                state.focused_leaf = None;
+                state.slot_focus = None;
+                state.slot_buffer.clear();
             }
         }
         state.drag = None; state.press = None; state.moved = false;
     }
 }
 
+#[allow(dead_code)]
 fn is_literal(e: &Expr) -> bool { matches!(e, Expr::Number(_) | Expr::Str(_) | Expr::Bool(_)) }
 
 #[allow(clippy::too_many_arguments)]
@@ -294,6 +306,89 @@ fn region(
         ui.spacing_mut().item_spacing.y = 3.0 * zoom;
         match &block.kind {
             BlockKind::Equation { source } | BlockKind::Result { source } => {
+                if !editing { crate::template::ensure(state, block.id, source); }
+                let has_tpl = !editing && state.templates.contains_key(&block.id);
+                if editing {
+                    // Literal input. Nothing is inserted, completed or appended for you.
+                    let mut text = source.clone();
+                    let resp = ui.add(egui::TextEdit::singleline(&mut text)
+                        .id(egui::Id::new(("eq", block.id)))
+                        .font(theme::math(math_size))
+                        .desired_width(width - 16.0)
+                        .margin(4.0));
+                    if state.focus_request == Some(block.id) { resp.request_focus(); }
+                    if resp.changed() { actions.push(UiAction::UpdateSource(block.id, text.clone())); }
+                    if resp.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        actions.push(UiAction::UpdateSource(block.id, text));
+                        actions.push(UiAction::Edit(block.id, false));
+                    }
+                } else if has_tpl {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 7.0 * zoom;
+                        if let Some(painted) = crate::template::paint(ui, state, block.id, t, math_size) {
+                            for (slot, r) in &painted.slots { state.slot_hits.push((block.id, *slot, *r)); }
+                            crate::template::slot_editor(ui, ctx, state, session, block.id, t, math_size, &painted);
+                            for (path, r, _txt) in &painted.leaves { state.leaf_hits.push((block.id, path.clone(), *r)); }
+                            crate::template::leaf_editor(ui, ctx, state, session, block.id, t, math_size, &painted);
+                            // A result is shown ONLY when the object itself is an evaluation
+                            // (you typed the trailing "="). The sign is painted by the template.
+                            let wants_result = state.templates.get(&block.id)
+                                .map(|x| x.complete() && matches!(x, crate::template::Tpl::Eval(_)))
+                                .unwrap_or(false);
+                            if wants_result {
+                                let vals = session.values_for(block.id).to_vec();
+                                let shown = vals.iter().find(|(n, _)| n == "_").or_else(|| vals.first());
+                                if let Some((_, v)) = shown {
+                                    ui.label(egui::RichText::new(v.display()).font(theme::math(math_size)).strong().color(t.ink));
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    let stmts = session.parsed_block(block.id);
+                    let values = session.values_for(block.id).to_vec();
+                    let result_block = matches!(block.kind, BlockKind::Result { .. });
+                    let typed_eval = source.trim_end().ends_with('=');
+                    if stmts.is_empty() {
+                        ui.label(egui::RichText::new(source).font(theme::math(math_size)).color(t.ink_faint));
+                    }
+                    for stmt in &stmts {
+                        let value = match stmt {
+                            Statement::Assign { name, .. } | Statement::FuncDef { name, .. } =>
+                                values.iter().find(|(n, _)| n == name).map(|(_, v)| v),
+                            Statement::Expr(_) => values.iter().find(|(n, _)| n == "_").map(|(_, v)| v),
+                        };
+                        let echo = match stmt {
+                            Statement::FuncDef { .. } => false,
+                            Statement::Expr(_) => typed_eval,
+                            Statement::Assign { .. } => result_block,
+                        };
+                        math_render::show(ui, &math_render::definition_node(stmt, value, echo), math_size);
+                    }
+                }
+                let settled = state.templates.get(&block.id).map(|x| x.complete()).unwrap_or(true);
+                if settled {
+                    for err in session.errors_for(block.id) {
+                        ui.add_space(2.0);
+                        let friendly = if err.contains("scalar is not callable") {
+                            "the integrand must be a function of x — try x^2 or sin(x)".to_string()
+                        } else { err.clone() };
+                        ui.horizontal(|ui| {
+                            theme::icon(ui, Icon::Info, 12.0, t.danger);
+                            ui.label(egui::RichText::new(friendly).size(11.0 * zoom).color(t.danger));
+                        });
+                        if err.contains("undefined symbol") {
+                            let name = err.split("'").nth(1).unwrap_or("x").to_string();
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("define {name} :=")).size(10.0 * zoom).color(t.ink_faint));
+                                if ui.small_button("Define").on_hover_text("Create the definition and fill its value").clicked() {
+                                    actions.push(UiAction::DefineSymbol(name.clone(), block.x, block.y + 72.0));
+                                }
+                            });
+                        }
+                    }
+                }
+            } | BlockKind::Result { source } => {
                 crate::template::ensure(state, block.id, source);
                 if state.templates.contains_key(&block.id) {
                     // Expression and its value share one baseline row.
@@ -301,7 +396,9 @@ fn region(
                         ui.spacing_mut().item_spacing.x = 7.0 * zoom;
                         if let Some(painted) = crate::template::paint(ui, state, block.id, t, math_size) {
                             for (slot, r) in &painted.slots { state.slot_hits.push((block.id, *slot, *r)); }
-                            crate::template::slot_editor(ui, ctx, state, session, block.id, t, math_size, &painted.slots);
+                            crate::template::slot_editor(ui, ctx, state, session, block.id, t, math_size, &painted);
+                            for (path, r, _txt) in &painted.leaves { state.leaf_hits.push((block.id, path.clone(), *r)); }
+                            crate::template::leaf_editor(ui, ctx, state, session, block.id, t, math_size, &painted);
                             let complete = state.templates.get(&block.id).map(|x| x.complete()).unwrap_or(false);
                             if complete {
                                 let vals = session.values_for(block.id).to_vec();
@@ -361,8 +458,13 @@ fn region(
                             ui.label(egui::RichText::new(friendly).size(11.0 * zoom).color(t.danger));
                         });
                         if err.contains("undefined symbol") {
-                            let name = err.split("'").nth(1).unwrap_or("x");
-                            ui.label(egui::RichText::new(format!("define it first:  {name} := 1.5")).size(10.0 * zoom).color(t.ink_faint));
+                            let name = err.split("'").nth(1).unwrap_or("x").to_string();
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("define {name} :=")).size(10.0 * zoom).color(t.ink_faint));
+                                if ui.small_button("Define").on_hover_text("Create the definition and fill its value").clicked() {
+                                    actions.push(UiAction::DefineSymbol(name.clone(), block.x, block.y + 72.0));
+                                }
+                            });
                         }
                     }
                 }
