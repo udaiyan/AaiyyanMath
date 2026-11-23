@@ -4,7 +4,8 @@
 node_modules/
 /dist
 .archive-*/
+.aaiyyan-backup/
 *.log
-.aaiyyan-backup
-.archive-20261123-200843
-.idea
+*.tsbuildinfo
+.idea/
+.DS_Store
