@@ -1,13 +1,10 @@
 /target
-**/*.rs.bk
-.venv/
-__pycache__/
-*.pyc
-*.bak
-*.aaiyyan.tmp
-/out
-/reports
-.aaiyyan-recovery/
-# JetBrains IDE
-.idea/
-.aaiyyan-backup/
+/src-tauri/target
+/src-tauri/gen
+node_modules/
+/dist
+.archive-*/
+*.log
+.aaiyyan-backup
+.archive-20261123-200843
+.idea
