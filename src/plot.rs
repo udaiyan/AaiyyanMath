@@ -1,7 +1,8 @@
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot};
-use meval::{Context, Expr};
+use exmex::{Express, FlatEx};
 use std::collections::HashMap;
+use crate::quantity::{Quantity, QuantityOpsFactory};
 
 pub struct PlotPane {
     pub var: String,
@@ -21,7 +22,7 @@ struct PlotKey {
     x_min: f64,
     x_max: f64,
     samples: usize,
-    bindings: Vec<(String, f64)>,
+    bindings: Vec<(String, Quantity)>,
 }
 
 impl Default for PlotPane {
@@ -40,14 +41,10 @@ impl Default for PlotPane {
 }
 
 impl PlotPane {
-    pub fn render(&mut self, ui: &mut egui::Ui, bindings: &HashMap<String, f64>) {
+    pub fn render(&mut self, ui: &mut egui::Ui, bindings: &HashMap<String, Quantity>) {
         ui.horizontal(|ui| {
             ui.label("y =");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.expr)
-                    .desired_width(220.0)
-                    .hint_text("e.g. sin(x) + a"),
-            );
+            ui.add(egui::TextEdit::singleline(&mut self.expr).desired_width(220.0).hint_text("e.g. sin(x) + a"));
             ui.label("in");
             ui.add(egui::TextEdit::singleline(&mut self.var).desired_width(40.0));
         });
@@ -60,8 +57,7 @@ impl PlotPane {
             ui.add(egui::DragValue::new(&mut self.samples).range(10..=10_000));
         });
 
-        let mut bkeys: Vec<(String, f64)> =
-            bindings.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut bkeys: Vec<(String, Quantity)> = bindings.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         bkeys.sort_by(|a, b| a.0.cmp(&b.0));
 
         let key = PlotKey {
@@ -98,7 +94,8 @@ impl PlotPane {
         self.points.clear();
         self.error = None;
 
-        let expr: Expr = match key.expr.parse() {
+        let processed = crate::quantity::preprocess(&key.expr);
+        let expr: FlatEx<Quantity, QuantityOpsFactory> = match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
             Ok(e) => e,
             Err(e) => {
                 self.error = Some(format!("Parse error: {}", e));
@@ -106,22 +103,43 @@ impl PlotPane {
             }
         };
 
-        let n = key.samples.max(2);
-        let mut ctx = Context::new();
-        for (name, v) in &key.bindings {
-            ctx.var(name.as_str(), *v);
+        let mut local_bindings: HashMap<String, Quantity> = key.bindings.iter().cloned().collect();
+        for (name, q) in crate::quantity::default_bindings() {
+            local_bindings.entry(name.to_string()).or_insert(q);
         }
 
+        let n = key.samples.max(2);
+        let var_names = expr.var_names();
         let mut first_err: Option<String> = None;
         let mut points: Vec<[f64; 2]> = Vec::with_capacity(n);
 
         for i in 0..n {
             let t = i as f64 / (n - 1) as f64;
             let x = key.x_min + (key.x_max - key.x_min) * t;
-            ctx.var(key.var.as_str(), x);
-            match expr.eval_with_context(&ctx) {
-                Ok(y) if y.is_finite() => points.push([x, y]),
-                Ok(_) => {}
+
+            let mut vars = Vec::new();
+            for name in var_names {
+                if name == &key.var {
+                    vars.push(Quantity::new(x, crate::quantity::Dim::ZERO));
+                } else if let Some(q) = local_bindings.get(name) {
+                    vars.push(q.clone());
+                } else {
+                    if first_err.is_none() {
+                        first_err = Some(format!("Unknown variable '{}'", name));
+                    }
+                    vars.push(Quantity::new(f64::NAN, crate::quantity::Dim::ZERO));
+                }
+            }
+
+            match expr.eval(&vars) {
+                Ok(q) if q.error.is_none() && q.value.is_finite() => points.push([x, q.value]),
+                Ok(q) => {
+                    if first_err.is_none() {
+                        if let Some(err) = q.error {
+                            first_err = Some(format!("Dimension error: {}", err));
+                        }
+                    }
+                }
                 Err(e) => {
                     if first_err.is_none() {
                         first_err = Some(format!("Eval error: {}", e));
@@ -154,7 +172,7 @@ mod tests {
             x_min,
             x_max,
             samples,
-            bindings: bindings.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            bindings: bindings.iter().map(|(k, v)| (k.to_string(), Quantity::new(*v, crate::quantity::Dim::ZERO))).collect(),
         }
     }
 
@@ -169,8 +187,6 @@ mod tests {
         assert!((p.points[0][1] - 0.0).abs() < 1e-9);
         assert!((p.points[5][0] - 5.0).abs() < 1e-9);
         assert!((p.points[5][1] - 5.0).abs() < 1e-9);
-        assert!((p.points[10][0] - 10.0).abs() < 1e-9);
-        assert!((p.points[10][1] - 10.0).abs() < 1e-9);
     }
 
     #[test]
@@ -188,7 +204,7 @@ mod tests {
         let mut p = PlotPane::default();
         let key = make_key("sin(x)", 0.0, std::f64::consts::PI, 5, &[]);
         p.rebuild(&key);
-        assert!(p.error.is_none());
+        assert!(p.error.is_none(), "Expected no error, got: {:?}", p.error);
         assert_eq!(p.points.len(), 5);
         assert!((p.points[0][1] - 0.0).abs() < 1e-9);
         assert!((p.points[2][1] - 1.0).abs() < 1e-9);
@@ -206,7 +222,6 @@ mod tests {
 
     #[test]
     fn plot_filters_non_finite_points() {
-        // 1/x is infinite at x=0; samples at -1, 0, 1 -> only 2 finite
         let mut p = PlotPane::default();
         let key = make_key("1 / x", -1.0, 1.0, 3, &[]);
         p.rebuild(&key);

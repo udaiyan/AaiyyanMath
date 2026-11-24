@@ -1,7 +1,7 @@
 mod app;
 mod expression;
 mod plot;
-mod units;
+mod quantity;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

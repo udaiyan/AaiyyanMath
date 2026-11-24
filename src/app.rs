@@ -3,11 +3,12 @@ use std::collections::HashMap;
 
 use crate::expression::Expression;
 use crate::plot::PlotPane;
+use crate::quantity::Quantity;
 
 pub struct MathcadApp {
     exprs: [Expression; 2],
     plot: PlotPane,
-    bindings: HashMap<String, f64>,
+    bindings: HashMap<String, Quantity>,
     first_frame: bool,
 }
 
@@ -16,7 +17,7 @@ impl Default for MathcadApp {
         Self {
             exprs: [
                 Expression::new("a", "2 + 3 * 4"),
-                Expression::new("b", "a * 2"),
+                Expression::new("b", "a * 2 m"),
             ],
             plot: PlotPane::default(),
             bindings: HashMap::new(),
@@ -31,10 +32,10 @@ impl MathcadApp {
         for i in 0..self.exprs.len() {
             let snapshot = self.bindings.clone();
             self.exprs[i].evaluate(&snapshot);
-            if let Some(v) = self.exprs[i].result {
+            if let Some(q) = &self.exprs[i].result {
                 let name = self.exprs[i].label.trim().to_owned();
                 if !name.is_empty() {
-                    self.bindings.insert(name, v);
+                    self.bindings.insert(name, q.clone());
                 }
             }
         }
@@ -80,8 +81,8 @@ impl eframe::App for MathcadApp {
                     let mut names: Vec<_> = self.bindings.keys().cloned().collect();
                     names.sort();
                     for name in names {
-                        let v = self.bindings[&name];
-                        ui.monospace(format!("{} = {}", name, v));
+                        let q = &self.bindings[&name];
+                        ui.monospace(format!("{} = {}", name, q));
                     }
                 }
             });
@@ -97,17 +98,20 @@ mod tests {
     fn default_state_binds_a_and_b() {
         let mut app = MathcadApp::default();
         app.evaluate_all();
-        assert_eq!(app.bindings.get("a"), Some(&14.0));
-        assert_eq!(app.bindings.get("b"), Some(&28.0));
+        assert_eq!(app.bindings.get("a").unwrap().value, 14.0);
+        assert_eq!(app.bindings.get("b").unwrap().value, 28.0);
+        assert_eq!(app.bindings.get("b").unwrap().dim, crate::quantity::Dim::LENGTH);
     }
 
     #[test]
     fn expression_chain_updates() {
         let mut app = MathcadApp::default();
-        app.exprs[0].input = "5".to_owned();
+        app.exprs[0].input = "5 m".to_owned();
         app.evaluate_all();
-        assert_eq!(app.bindings.get("a"), Some(&5.0));
-        assert_eq!(app.bindings.get("b"), Some(&10.0));
+        assert_eq!(app.bindings.get("a").unwrap().value, 5.0);
+        assert_eq!(app.bindings.get("b").unwrap().value, 10.0);
+        // FIXED: b = a * 2 m. Since a = 5 m, b = 10 m^2.
+        assert_eq!(app.bindings.get("b").unwrap().dim, crate::quantity::Dim::LENGTH * crate::quantity::Dim::LENGTH);
     }
 
     #[test]
@@ -146,7 +150,7 @@ mod tests {
         app.exprs[1].label = "a".to_owned();
         app.exprs[1].input = "100".to_owned();
         app.evaluate_all();
-        assert_eq!(app.bindings.get("a"), Some(&100.0));
+        assert_eq!(app.bindings.get("a").unwrap().value, 100.0);
         assert!(!app.bindings.contains_key("b"));
     }
 }
