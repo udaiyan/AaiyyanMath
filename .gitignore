@@ -1,11 +1,3 @@
 /target
-/src-tauri/target
-/src-tauri/gen
-node_modules/
-/dist
-.archive-*/
-.aaiyyan-backup/
-*.log
-*.tsbuildinfo
 .idea/
-.DS_Store
+*.rs.bk

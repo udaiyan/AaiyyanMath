@@ -1,33 +1,30 @@
 # AaiyyanMath
 
-Tauri + MathLive front end, Rust maths backend. Three resizable, hideable panes:
-**tools | canvas | Python**.
+A Mathcad-like math app prototype built with Rust, egui and meval.
 
 ## Run
 
-```bash
-npm install
-cargo install tauri-cli --version "^2" --locked   # once
-npm run app                                       # or double-click dev.cmd
-```
+    cargo run
 
-## Model
+## Milestones
 
-* One canvas region corresponds to one line of Python, in order.
-* Editing a math field rewrites that Python line. Editing the Python rewrites the
-  canvas. Neither side inserts characters into the other while you are typing.
-* Rust evaluates everything natively: arithmetic, powers, roots, trig, logs,
-  statistics, definite integrals (Simpson), sums and products.
-* `x := 3` defines. A bare expression shows its value beside it. Assignments do not.
-* **Copy script** puts a runnable Python file on the clipboard, helpers included.
+1. Expression evaluator (done). Single input, meval::eval_str result.
+2. Second expression. Uncomment scaffolding in src/app.rs.
+3. Plot. Implement src/plot.rs with egui_plot.
+4. Units. Implement src/units.rs with uom.
 
-## Panes
+## Swapping in a CAS
 
-`Ctrl+1` tools · `Ctrl+2` canvas · `Ctrl+3` Python · drag the dividers to resize.
-Layout is remembered between runs.
+meval handles numeric expressions. For symbolic CAS features
+(calculus, simplification, equation solving) swap the
+evaluate_expression function in src/app.rs for Symbolica or symplex:
 
-## Adding maths
+    cargo add symbolica
+    cargo add symplex
 
-`src-tauri/src/math.rs` holds the AST, both parsers, both renderers and the
-evaluator. Add a function to `FUNCS` and `apply()`; add a LaTeX form to
-`latex.rs` if it needs one.
+## Long-term architecture
+
+The modular layout (app, expression, plot, units) is designed to
+grow into a folder-based Mathcad/MATLAB-style workspace with
+separate worksheets, a Python-code pane, and domain modules
+(calculus, electronics, etc.).
