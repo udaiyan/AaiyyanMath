@@ -1,91 +1,91 @@
 use eframe::egui;
-use std::collections::HashMap;
-
-use crate::expression::Expression;
-use crate::plot::PlotPane;
-use crate::quantity::Quantity;
+use crate::worksheet::Worksheet;
+use crate::python::generate_python;
 
 pub struct MathcadApp {
-    exprs: [Expression; 2],
-    plot: PlotPane,
-    bindings: HashMap<String, Quantity>,
-    first_frame: bool,
+    worksheets: Vec<Worksheet>,
+    active_idx: usize,
 }
 
 impl Default for MathcadApp {
     fn default() -> Self {
         Self {
-            exprs: [
-                Expression::new("a", "2 + 3 * 4"),
-                Expression::new("b", "a * 2 m"),
-            ],
-            plot: PlotPane::default(),
-            bindings: HashMap::new(),
-            first_frame: true,
-        }
-    }
-}
-
-impl MathcadApp {
-    fn evaluate_all(&mut self) {
-        self.bindings.clear();
-        for i in 0..self.exprs.len() {
-            let snapshot = self.bindings.clone();
-            self.exprs[i].evaluate(&snapshot);
-            if let Some(q) = &self.exprs[i].result {
-                let name = self.exprs[i].label.trim().to_owned();
-                if !name.is_empty() {
-                    self.bindings.insert(name, q.clone());
-                }
-            }
+            worksheets: vec![Worksheet::new("Scratchpad")],
+            active_idx: 0,
         }
     }
 }
 
 impl eframe::App for MathcadApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.heading("AaiyyanMath");
-
-                let mut any_changed = false;
-                for (i, expr) in self.exprs.iter_mut().enumerate() {
-                    ui.group(|ui| {
-                        ui.label(format!("Expression {}", i + 1));
-                        if expr.render(ui) {
-                            any_changed = true;
-                        }
-                    });
-                    ui.add_space(6.0);
-                }
-
-                if self.first_frame {
-                    self.first_frame = false;
-                    self.evaluate_all();
-                } else if any_changed {
-                    self.evaluate_all();
-                }
-
+        // --- Left Sidebar (Workspaces) ---
+        egui::SidePanel::left("workspace_sidebar")
+            .resizable(true)
+            .default_width(200.0)
+            .show(ctx, |ui| {
+                ui.heading("Workspaces");
                 ui.separator();
-                ui.group(|ui| {
-                    ui.label("Plot");
-                    self.plot.render(ui, &self.bindings);
-                });
 
-                ui.add_space(6.0);
-                ui.separator();
-                ui.heading("Bindings");
-                if self.bindings.is_empty() {
-                    ui.weak("(none)");
-                } else {
-                    let mut names: Vec<_> = self.bindings.keys().cloned().collect();
-                    names.sort();
-                    for name in names {
-                        let q = &self.bindings[&name];
-                        ui.monospace(format!("{} = {}", name, q));
+                let mut clicked_idx = None;
+                for (i, ws) in self.worksheets.iter_mut().enumerate() {
+                    let mut name = ws.name.clone();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .desired_width(ui.available_width() - 10.0)
+                            .text_color(if self.active_idx == i { egui::Color32::LIGHT_BLUE } else { ui.style().visuals.text_color() })
+                    );
+
+                    if response.changed() {
+                        ws.name = name;
                     }
+                    if response.clicked() {
+                        clicked_idx = Some(i);
+                    }
+                    ui.add_space(2.0);
+                }
+
+                if let Some(idx) = clicked_idx {
+                    self.active_idx = idx;
+                }
+
+                ui.separator();
+                if ui.button("➕ New Workspace").clicked() {
+                    let new_name = format!("Worksheet {}", self.worksheets.len() + 1);
+                    self.worksheets.push(Worksheet::new(&new_name));
+                    self.active_idx = self.worksheets.len() - 1;
                 }
             });
+
+        // --- Right Sidebar (Python Code) ---
+        egui::SidePanel::right("python_code_panel")
+            .resizable(true)
+            .default_width(400.0)
+            .show(ctx, |ui| {
+                ui.heading("Python Code");
+                ui.separator();
+
+                if let Some(ws) = self.worksheets.get(self.active_idx) {
+                    let code = generate_python(ws);
+                    let mut code_view = code.clone();
+
+                    egui::ScrollArea::both().show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut code_view)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .interactive(false) // Make it read-only
+                        );
+                    });
+                }
+            });
+
+        // --- Main Workspace Area (Mathcad) ---
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if let Some(ws) = self.worksheets.get_mut(self.active_idx) {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ws.render(ui);
+                });
+            }
         });
     }
 }
@@ -95,62 +95,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_state_binds_a_and_b() {
-        let mut app = MathcadApp::default();
-        app.evaluate_all();
-        assert_eq!(app.bindings.get("a").unwrap().value, 14.0);
-        assert_eq!(app.bindings.get("b").unwrap().value, 28.0);
-        assert_eq!(app.bindings.get("b").unwrap().dim, crate::quantity::Dim::LENGTH);
+    fn app_starts_with_one_workspace() {
+        let app = MathcadApp::default();
+        assert_eq!(app.worksheets.len(), 1);
+        assert_eq!(app.active_idx, 0);
     }
 
     #[test]
-    fn expression_chain_updates() {
+    fn can_add_workspaces() {
         let mut app = MathcadApp::default();
-        app.exprs[0].input = "5 m".to_owned();
-        app.evaluate_all();
-        assert_eq!(app.bindings.get("a").unwrap().value, 5.0);
-        assert_eq!(app.bindings.get("b").unwrap().value, 10.0);
-        // FIXED: b = a * 2 m. Since a = 5 m, b = 10 m^2.
-        assert_eq!(app.bindings.get("b").unwrap().dim, crate::quantity::Dim::LENGTH * crate::quantity::Dim::LENGTH);
+        app.worksheets.push(Worksheet::new("Test WS"));
+        app.active_idx = 1;
+        assert_eq!(app.worksheets.len(), 2);
+        assert_eq!(app.worksheets[1].name, "Test WS");
     }
 
     #[test]
-    fn failure_in_pane1_breaks_pane2() {
-        let mut app = MathcadApp::default();
-        app.exprs[0].input = "2 +".to_owned();
-        app.evaluate_all();
-        assert!(!app.bindings.contains_key("a"));
-        assert!(!app.bindings.contains_key("b"));
-        assert!(app.exprs[1].error.is_some());
+    fn workspace_bindings_are_isolated() {
+        let mut ws1 = Worksheet::new("WS1");
+        ws1.exprs[0].input = "100".to_owned();
+        ws1.evaluate_all();
+
+        let mut ws2 = Worksheet::new("WS2");
+        ws2.exprs[0].input = "200".to_owned();
+        ws2.evaluate_all();
+
+        assert_eq!(ws1.bindings.get("a").unwrap().value, 100.0);
+        assert_eq!(ws2.bindings.get("a").unwrap().value, 200.0);
     }
 
     #[test]
-    fn empty_label_skips_binding() {
+    fn switching_workspace_updates_python_output() {
         let mut app = MathcadApp::default();
-        app.exprs[0].label = String::new();
-        app.evaluate_all();
-        assert!(!app.bindings.contains_key("a"));
-        assert!(app.exprs[0].result.is_some());
-        assert!(app.exprs[1].error.is_some());
-    }
 
-    #[test]
-    fn stale_bindings_cleared_between_runs() {
-        let mut app = MathcadApp::default();
-        app.evaluate_all();
-        assert!(app.bindings.contains_key("a"));
-        app.exprs[0].input = "bad +".to_owned();
-        app.evaluate_all();
-        assert!(!app.bindings.contains_key("a"));
-    }
+        // Workspace 1 has default math (a = 2 + 3 * 4)
+        let code_ws1 = generate_python(&app.worksheets[0]);
+        assert!(code_ws1.contains("a = 2+3*4"));
 
-    #[test]
-    fn later_pane_with_same_name_overwrites() {
-        let mut app = MathcadApp::default();
-        app.exprs[1].label = "a".to_owned();
-        app.exprs[1].input = "100".to_owned();
-        app.evaluate_all();
-        assert_eq!(app.bindings.get("a").unwrap().value, 100.0);
-        assert!(!app.bindings.contains_key("b"));
+        // Create a new workspace and change its math
+        let mut ws2 = Worksheet::new("WS2");
+        ws2.exprs[0].input = "999 m".to_owned();
+        app.worksheets.push(ws2);
+
+        // Switch to Workspace 2
+        app.active_idx = 1;
+        let code_ws2 = generate_python(&app.worksheets[app.active_idx]);
+
+        // Verify the Python output changed to match the new workspace
+        assert!(code_ws2.contains("a = 999*m"));
+        assert!(!code_ws2.contains("2+3*4"));
     }
 }
