@@ -1,0 +1,92 @@
+{
+  "worksheets": [
+    {
+      "name": "Scratchpad",
+      "regions": [
+        {
+          "Math": {
+            "label": "a",
+            "input": "2 + 3 * 4"
+          }
+        },
+        {
+          "Text": "Welcome to AaiyyanMath.\nThis is a Text Region. You can write notes here."
+        },
+        {
+          "Math": {
+            "label": "b",
+            "input": "a * 2 m"
+          }
+        },
+        {
+          "Plot": {
+            "var": "x",
+            "expr": "sin(x)",
+            "x_min": -6.28,
+            "x_max": 6.28,
+            "samples": 500
+          }
+        }
+      ]
+    },
+    {
+      "name": "Worksheet 2",
+      "regions": [
+        {
+          "Text": "Welcome to AaiyyanMath.\nThis is a Text Region. You can write notes here."
+        },
+        {
+          "Math": {
+            "label": "a",
+            "input": "2 + 3 * 4"
+          }
+        },
+        {
+          "Math": {
+            "label": "b",
+            "input": "a * 2 m"
+          }
+        },
+        {
+          "Plot": {
+            "var": "x",
+            "expr": "sin(x)",
+            "x_min": -6.28,
+            "x_max": 6.28,
+            "samples": 500
+          }
+        }
+      ]
+    },
+    {
+      "name": "Worksheet 3",
+      "regions": [
+        {
+          "Text": "Welcome to AaiyyanMath.\nThis is a Text Region. You can write notes here."
+        },
+        {
+          "Math": {
+            "label": "a",
+            "input": "2 + 3 * 4"
+          }
+        },
+        {
+          "Math": {
+            "label": "b",
+            "input": "a * 2 m"
+          }
+        },
+        {
+          "Plot": {
+            "var": "x",
+            "expr": "sin(x)",
+            "x_min": -6.28,
+            "x_max": 6.28,
+            "samples": 500
+          }
+        }
+      ]
+    }
+  ],
+  "active_idx": 2
+}

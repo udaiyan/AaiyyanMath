@@ -1,12 +1,16 @@
 use eframe::egui;
 use exmex::{Express, FlatEx};
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 use crate::quantity::{Quantity, QuantityOpsFactory};
 
+#[derive(Serialize, Deserialize)]
 pub struct Expression {
     pub label: String,
     pub input: String,
+    #[serde(skip)]
     pub result: Option<Quantity>,
+    #[serde(skip)]
     pub error: Option<String>,
 }
 

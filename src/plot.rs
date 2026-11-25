@@ -2,16 +2,21 @@ use eframe::egui;
 use egui_plot::{Legend, Line, Plot};
 use exmex::{Express, FlatEx};
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 use crate::quantity::{Quantity, QuantityOpsFactory};
 
+#[derive(Serialize, Deserialize)]
 pub struct PlotPane {
     pub var: String,
     pub expr: String,
     pub x_min: f64,
     pub x_max: f64,
     pub samples: usize,
+    #[serde(skip)]
     last_key: Option<PlotKey>,
+    #[serde(skip)]
     points: Vec<[f64; 2]>,
+    #[serde(skip)]
     error: Option<String>,
 }
 

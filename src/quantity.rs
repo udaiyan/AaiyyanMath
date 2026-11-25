@@ -3,8 +3,9 @@ use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
 
 use exmex::{BinOp, MakeOperators, Operator};
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dim(pub [i8; 7]);
 
 impl Dim {
@@ -68,7 +69,7 @@ impl fmt::Display for Dim {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Quantity {
     pub value: f64,
     pub dim: Dim,
@@ -276,7 +277,6 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
                     is_commutative: false,
                 },
             ),
-            // --- Dimensionless functions (Trig, Log) ---
             Operator::make_unary("sin", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.sin(), Dim::ZERO) } }),
             Operator::make_unary("cos", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.cos(), Dim::ZERO) } }),
             Operator::make_unary("tan", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.tan(), Dim::ZERO) } }),
@@ -289,13 +289,10 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
             Operator::make_unary("ln", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.ln(), Dim::ZERO) } }),
             Operator::make_unary("log", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.log10(), Dim::ZERO) } }),
             Operator::make_unary("exp", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.exp(), Dim::ZERO) } }),
-
-            // --- Dimension-preserving functions ---
             Operator::make_unary("abs", |a| Quantity::new(a.value.abs(), a.dim)),
             Operator::make_unary("floor", |a| Quantity::new(a.value.floor(), a.dim)),
             Operator::make_unary("ceil", |a| Quantity::new(a.value.ceil(), a.dim)),
             Operator::make_unary("round", |a| Quantity::new(a.value.round(), a.dim)),
-
             Operator::make_unary("sqrt", |a| {
                 let mut new_dim = a.dim;
                 for i in 0..7 {
@@ -304,8 +301,6 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
                 }
                 Quantity::new(a.value.sqrt(), new_dim)
             }),
-
-            // --- Comparison functions ---
             Operator::make_bin(
                 "min",
                 BinOp {
@@ -347,7 +342,6 @@ mod tests {
     use super::*;
     use exmex::{Express, FlatEx};
 
-    // Helper function to evaluate a string directly in tests
     fn eval_str(s: &str) -> Quantity {
         let processed = preprocess(s);
         let expr: FlatEx<Quantity, QuantityOpsFactory> = FlatEx::parse(&processed).unwrap();

@@ -138,14 +138,14 @@ mod tests {
 
     #[test]
     fn test_generate_python_skips_empty() {
-        let ws = make_math_ws("a", ""); // Empty input
+        let ws = make_math_ws("a", "");
         let code = generate_python(&ws);
         assert!(!code.contains("# Math Region 1"));
     }
 
     #[test]
     fn test_generate_python_unnamed() {
-        let ws = make_math_ws("", "2 + 2"); // Unnamed
+        let ws = make_math_ws("", "2 + 2");
         let code = generate_python(&ws);
         assert!(code.contains("print(2+2)"));
     }
@@ -153,8 +153,6 @@ mod tests {
     #[test]
     fn test_generate_python_plot() {
         let mut ws = Worksheet::new("Test");
-
-        // FIX: Create default plot and set public fields instead of struct update syntax
         let mut plot = crate::plot::PlotPane::default();
         plot.var = "x".to_owned();
         plot.expr = "sin(x)".to_owned();

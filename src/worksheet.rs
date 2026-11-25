@@ -1,14 +1,16 @@
 use eframe::egui;
 use std::collections::HashMap;
-
+use serde::{Serialize, Deserialize};
 use crate::expression::Expression;
 use crate::plot::PlotPane;
 use crate::quantity::Quantity;
 use crate::region::Region;
 
+#[derive(Serialize, Deserialize)]
 pub struct Worksheet {
     pub name: String,
     pub regions: Vec<Region>,
+    #[serde(skip)]
     pub bindings: HashMap<String, Quantity>,
 }
 
@@ -219,7 +221,7 @@ mod tests {
         assert_eq!(ws.regions.len(), initial_len + 1);
         assert_eq!(ws.bindings.get("c").unwrap().value, 56.0);
 
-        ws.regions.remove(0); // Remove the Text region
+        ws.regions.remove(0);
         ws.evaluate_all();
         assert_eq!(ws.regions.len(), initial_len);
     }
