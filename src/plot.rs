@@ -49,7 +49,7 @@ impl PlotPane {
     pub fn render(&mut self, ui: &mut egui::Ui, bindings: &HashMap<String, Quantity>) {
         ui.horizontal(|ui| {
             ui.label("y =");
-            ui.add(egui::TextEdit::singleline(&mut self.expr).desired_width(220.0).hint_text("e.g. sin(x) + a"));
+            ui.add(egui::TextEdit::singleline(&mut self.expr).desired_width(220.0).hint_text("e.g. deriv(x^2, x)"));
             ui.label("in");
             ui.add(egui::TextEdit::singleline(&mut self.var).desired_width(40.0));
         });
@@ -99,7 +99,19 @@ impl PlotPane {
         self.points.clear();
         self.error = None;
 
-        let processed = crate::quantity::preprocess(&key.expr);
+        let mut local_bindings: HashMap<String, Quantity> = key.bindings.iter().cloned().collect();
+        for (name, q) in crate::quantity::default_bindings() {
+            local_bindings.entry(name.to_string()).or_insert(q);
+        }
+
+        let processed = match crate::quantity::expand_calculus(&key.expr, &local_bindings) {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+
         let expr: FlatEx<Quantity, QuantityOpsFactory> = match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
             Ok(e) => e,
             Err(e) => {
@@ -107,11 +119,6 @@ impl PlotPane {
                 return;
             }
         };
-
-        let mut local_bindings: HashMap<String, Quantity> = key.bindings.iter().cloned().collect();
-        for (name, q) in crate::quantity::default_bindings() {
-            local_bindings.entry(name.to_string()).or_insert(q);
-        }
 
         let n = key.samples.max(2);
         let var_names = expr.var_names();
@@ -242,5 +249,14 @@ mod tests {
         p.rebuild(&key);
         assert!(p.error.is_none());
         assert!((p.points[1][1] - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn plot_calculus() {
+        let mut p = PlotPane::default();
+        let key = make_key("deriv(x^2, x)", 0.0, 10.0, 11, &[]);
+        p.rebuild(&key);
+        assert!(p.error.is_none());
+        assert_eq!(p.points.len(), 11);
     }
 }

@@ -32,7 +32,14 @@ impl Expression {
             return;
         }
 
-        let processed = crate::quantity::preprocess(&self.input);
+        let processed = match crate::quantity::expand_calculus(&self.input, bindings) {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+
         let expr: FlatEx<Quantity, QuantityOpsFactory> = match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
             Ok(e) => e,
             Err(e) => {
@@ -83,7 +90,7 @@ impl Expression {
             if ui.add(
                 egui::TextEdit::singleline(&mut self.input)
                     .desired_width(f32::INFINITY)
-                    .hint_text("e.g. 5 m / 2 s"),
+                    .hint_text("e.g. deriv(x^2, x) or integ(x^2, x, 0, 3)"),
             ).changed() {
                 changed = true;
             }
@@ -217,5 +224,19 @@ mod tests {
         e.evaluate(&h(&[]));
         assert_eq!(e.result.unwrap().value, 1.0);
         assert!(e.error.is_none());
+    }
+
+    #[test]
+    fn test_derivative_numerical() {
+        let mut e = Expression::new("d", "deriv(x^2, x)");
+        e.evaluate(&h(&[]));
+        assert!((e.result.unwrap().value - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_integral_numerical() {
+        let mut e = Expression::new("i", "integ(x^2, x, 0, 3)");
+        e.evaluate(&h(&[]));
+        assert!((e.result.unwrap().value - 9.0).abs() < 1e-6);
     }
 }

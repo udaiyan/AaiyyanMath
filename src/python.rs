@@ -1,5 +1,5 @@
 use crate::worksheet::Worksheet;
-use crate::quantity::preprocess;
+use crate::quantity::{preprocess, split_top_level};
 use crate::region::Region;
 use regex::Regex;
 
@@ -10,7 +10,9 @@ pub fn generate_python(ws: &Worksheet) -> String {
     code.push_str("import math\n");
     code.push_str("import numpy as np\n");
     code.push_str("import matplotlib.pyplot as plt\n");
-    code.push_str("import pint\n\n");
+    code.push_str("import pint\n");
+    code.push_str("import scipy.misc\n");
+    code.push_str("import scipy.integrate\n\n");
 
     code.push_str("ureg = pint.UnitRegistry()\n");
     code.push_str("m = ureg.meter\n");
@@ -72,7 +74,53 @@ pub fn generate_python(ws: &Worksheet) -> String {
 
 fn to_python(expr: &str) -> String {
     let mut s = preprocess(expr);
+
+    // 1. Expand deriv and integ to scipy
+    let mut out = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let current: String = chars[i..].iter().take(6).collect();
+        if current == "deriv(" {
+            let start = i + 6;
+            let mut depth = 1;
+            let mut end = start;
+            for j in start..chars.len() {
+                if chars[j] == '(' { depth += 1; }
+                if chars[j] == ')' { depth -= 1; if depth == 0 { end = j; break; } }
+            }
+            let inner: String = chars[start..end].iter().collect();
+            let parts = split_top_level(&inner, ',').iter().map(|s| s.trim()).collect::<Vec<_>>();
+            if parts.len() == 2 {
+                out.push_str(&format!("scipy.misc.derivative(lambda {}: {}, 0.0)", parts[1], to_python(parts[0])));
+                i = end + 1;
+                continue;
+            }
+        } else if current == "integ(" {
+            let start = i + 6;
+            let mut depth = 1;
+            let mut end = start;
+            for j in start..chars.len() {
+                if chars[j] == '(' { depth += 1; }
+                if chars[j] == ')' { depth -= 1; if depth == 0 { end = j; break; } }
+            }
+            let inner: String = chars[start..end].iter().collect();
+            let parts = split_top_level(&inner, ',').iter().map(|s| s.trim()).collect::<Vec<_>>();
+            if parts.len() == 4 {
+                out.push_str(&format!("scipy.integrate.quad(lambda {}: {}, {}, {})[0]", parts[1], to_python(parts[0]), parts[2], parts[3]));
+                i = end + 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    s = out;
+
+    // 2. Convert `^` to `**`
     s = s.replace("^", "**");
+
+    // 3. Map standard functions
     let re = Regex::new(r"\b(sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|ln|log|exp|sqrt|abs|floor|ceil|round|min|max)\(").unwrap();
     s = re.replace_all(&s, |caps: &regex::Captures| {
         let func = &caps[1];
@@ -88,6 +136,7 @@ fn to_python(expr: &str) -> String {
         };
         format!("{}(", py_func)
     }).to_string();
+
     s
 }
 
@@ -178,5 +227,11 @@ mod tests {
         let code = generate_python(&ws);
         assert!(code.contains("# Hello World"));
         assert!(code.contains("a = 5*m"));
+    }
+
+    #[test]
+    fn test_to_python_calculus() {
+        assert_eq!(to_python("deriv(x^2, x)"), "scipy.misc.derivative(lambda x: x**2, 0.0)");
+        assert_eq!(to_python("integ(x^2, x, 0, 3)"), "scipy.integrate.quad(lambda x: x**2, 0, 3)[0]");
     }
 }

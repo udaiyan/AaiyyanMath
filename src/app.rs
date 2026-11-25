@@ -16,10 +16,8 @@ pub struct MathcadApp {
 
 impl Default for MathcadApp {
     fn default() -> Self {
-        // Try to load from disk on startup
         if let Ok(json) = fs::read_to_string(SAVE_FILE) {
             if let Ok(mut app) = serde_json::from_str::<MathcadApp>(&json) {
-                // Re-evaluate all worksheets since bindings were skipped
                 for ws in &mut app.worksheets {
                     ws.evaluate_all();
                 }
@@ -28,7 +26,6 @@ impl Default for MathcadApp {
             }
         }
 
-        // Fallback to default if no file exists
         Self {
             worksheets: vec![Worksheet::new("Scratchpad")],
             active_idx: 0,
@@ -76,7 +73,6 @@ impl MathcadApp {
 
 impl eframe::App for MathcadApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // --- Top Panel (Save/Load) ---
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("AaiyyanMath");
@@ -93,7 +89,6 @@ impl eframe::App for MathcadApp {
             });
         });
 
-        // --- Left Sidebar (Workspaces) ---
         egui::SidePanel::left("workspace_sidebar")
             .resizable(true)
             .default_width(200.0)
@@ -127,7 +122,6 @@ impl eframe::App for MathcadApp {
                 }
             });
 
-        // --- Right Sidebar (Python Code) ---
         egui::SidePanel::right("python_code_panel")
             .resizable(true)
             .default_width(400.0)
@@ -150,7 +144,6 @@ impl eframe::App for MathcadApp {
                 }
             });
 
-        // --- Main Workspace Area (Mathcad) ---
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(ws) = self.worksheets.get_mut(self.active_idx) {
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -186,113 +179,39 @@ mod tests {
         let app = make_test_app();
         let json = serde_json::to_string(&app).unwrap();
 
-        // Ensure transient data is NOT serialized
-        assert!(!json.contains("bindings"));
-        assert!(!json.contains("last_key"));
+        assert!(!json.contains("bindings"), "Bindings should not be saved to disk!");
+        assert!(!json.contains("last_key"), "Plot cache should not be saved!");
 
         let mut loaded: MathcadApp = serde_json::from_str(&json).unwrap();
-        loaded.worksheets[1].evaluate_all(); // Simulate what Default::default() does
+        loaded.worksheets[1].evaluate_all();
 
         assert_eq!(loaded.worksheets.len(), 2);
         assert_eq!(loaded.active_idx, 1);
         assert_eq!(loaded.worksheets[1].name, "Test WS");
 
-        // Verify the math actually saved and re-evaluated correctly
-        assert_eq!(loaded.worksheets[1].bindings.get("x").unwrap().value, 999.0);
-        assert_eq!(loaded.worksheets[1].bindings.get("x").unwrap().dim, crate::quantity::Dim::LENGTH);
+        let x_binding = loaded.worksheets[1].bindings.get("x").expect("Math failed to re-evaluate on load");
+        assert_eq!(x_binding.value, 999.0);
+        assert_eq!(x_binding.dim, crate::quantity::Dim::LENGTH);
     }
 
     #[test]
     fn test_file_io_roundtrip() {
         let app = make_test_app();
 
-        // Save to temp file
+        // FIX: Use a unique filename to prevent parallel test race conditions
+        let temp_path = "test_temp_doc_io_roundtrip.json";
+
         let json = serde_json::to_string_pretty(&app).unwrap();
-        let temp_path = "test_temp_doc.json";
         std::fs::write(temp_path, &json).unwrap();
 
-        // Read back
         let read_json = std::fs::read_to_string(temp_path).unwrap();
         let mut loaded: MathcadApp = serde_json::from_str(&read_json).unwrap();
+
         loaded.worksheets[1].evaluate_all();
 
         assert_eq!(loaded.worksheets[1].regions.len(), 2);
         assert_eq!(loaded.worksheets[1].bindings.get("x").unwrap().value, 999.0);
 
-        // Cleanup
         let _ = std::fs::remove_file(temp_path);
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use crate::region::Region;
-        use crate::expression::Expression;
-
-        fn make_test_app() -> MathcadApp {
-            let mut ws2 = Worksheet::new("Test WS");
-            ws2.regions = vec![
-                Region::Text("Test text".to_string()),
-                Region::Math(Expression::new("x", "999 m")),
-            ];
-
-            MathcadApp {
-                worksheets: vec![Worksheet::new("Scratchpad"), ws2],
-                active_idx: 1,
-                status_message: None,
-            }
-        }
-
-        #[test]
-        fn test_serialization_roundtrip() {
-            let app = make_test_app();
-
-            // 1. Serialize to JSON
-            let json = serde_json::to_string(&app).unwrap();
-
-            // 2. PROVE that we are not saving transient/cached data
-            assert!(!json.contains("bindings"), "Bindings should not be saved to disk!");
-            assert!(!json.contains("last_key"), "Plot cache should not be saved!");
-
-            // 3. Deserialize back into an app
-            let mut loaded: MathcadApp = serde_json::from_str(&json).unwrap();
-
-            // 4. Simulate what the app does on startup: re-calculate all the math
-            loaded.worksheets[1].evaluate_all();
-
-            // 5. Verify structural data survived
-            assert_eq!(loaded.worksheets.len(), 2);
-            assert_eq!(loaded.active_idx, 1);
-            assert_eq!(loaded.worksheets[1].name, "Test WS");
-
-            // 6. Verify the math actually saved, loaded, and re-evaluated correctly
-            let x_binding = loaded.worksheets[1].bindings.get("x").expect("Math failed to re-evaluate on load");
-            assert_eq!(x_binding.value, 999.0);
-            assert_eq!(x_binding.dim, crate::quantity::Dim::LENGTH);
-        }
-
-        #[test]
-        fn test_file_io_roundtrip() {
-            let app = make_test_app();
-
-            // 1. Save to a temp file (so we don't overwrite the user's real save file)
-            let json = serde_json::to_string_pretty(&app).unwrap();
-            let temp_path = "test_temp_doc.json";
-            std::fs::write(temp_path, &json).unwrap();
-
-            // 2. Read it back from the hard drive
-            let read_json = std::fs::read_to_string(temp_path).unwrap();
-            let mut loaded: MathcadApp = serde_json::from_str(&read_json).unwrap();
-
-            // 3. Re-evaluate math
-            loaded.worksheets[1].evaluate_all();
-
-            // 4. Verify it loaded correctly
-            assert_eq!(loaded.worksheets[1].regions.len(), 2);
-            assert_eq!(loaded.worksheets[1].bindings.get("x").unwrap().value, 999.0);
-
-            // 5. Clean up the temp file so it doesn't clutter the directory
-            let _ = std::fs::remove_file(temp_path);
-        }
     }
 }

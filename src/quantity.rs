@@ -1,8 +1,9 @@
 use std::fmt;
 use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
+use std::collections::HashMap;
 
-use exmex::{BinOp, MakeOperators, Operator};
+use exmex::{BinOp, MakeOperators, Operator, Express, FlatEx};
 use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,6 +239,157 @@ pub fn default_bindings() -> Vec<(&'static str, Quantity)> {
     ]
 }
 
+pub fn find_func_call(s: &str, name: &str) -> Option<(usize, usize)> {
+    let start = s.find(&format!("{}(", name))?;
+    let mut depth = 0;
+    for (i, c) in s[start..].char_indices() {
+        if c == '(' { depth += 1; }
+        else if c == ')' {
+            depth -= 1;
+            if depth == 0 { return Some((start, start + i)); }
+        }
+    }
+    None
+}
+
+pub fn split_top_level(s: &str, delim: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut last = 0;
+    for (i, c) in s.char_indices() {
+        if c == '(' { depth += 1; }
+        else if c == ')' { depth -= 1; }
+        else if c == delim && depth == 0 {
+            parts.push(&s[last..i]);
+            last = i + 1;
+        }
+    }
+    parts.push(&s[last..]);
+    parts
+}
+
+pub fn evaluate_single_expr(expr: &str, bindings: &HashMap<String, Quantity>) -> Option<Quantity> {
+    let expanded = expand_calculus(expr, bindings).ok()?;
+    let parsed: FlatEx<Quantity, QuantityOpsFactory> = FlatEx::parse(&expanded).ok()?;
+    let var_names = parsed.var_names();
+    let mut vars = Vec::new();
+    for name in var_names {
+        if let Some(q) = bindings.get(name) {
+            vars.push(q.clone());
+        } else {
+            return None;
+        }
+    }
+    parsed.eval(&vars).ok()
+}
+
+pub fn numerical_derivative(
+    expr: &str,
+    var: &str,
+    at: f64,
+    bindings: &HashMap<String, Quantity>,
+) -> Quantity {
+    let h = 1e-5;
+    let eval_at = |x: f64| -> f64 {
+        let mut local_bindings = bindings.clone();
+        local_bindings.insert(var.to_string(), Quantity::new(x, Dim::ZERO));
+        evaluate_single_expr(expr, &local_bindings).map(|q| q.value).unwrap_or(f64::NAN)
+    };
+
+    let f_plus = eval_at(at + h);
+    let f_minus = eval_at(at - h);
+    let deriv_value = (f_plus - f_minus) / (2.0 * h);
+
+    let mut local_bindings = bindings.clone();
+    local_bindings.insert(var.to_string(), Quantity::new(1.0, Dim::ZERO));
+    let inner_dim = evaluate_single_expr(expr, &local_bindings).map(|q| q.dim).unwrap_or(Dim::ZERO);
+
+    Quantity::new(deriv_value, inner_dim)
+}
+
+pub fn numerical_integral(
+    expr: &str,
+    var: &str,
+    a: f64,
+    b: f64,
+    bindings: &HashMap<String, Quantity>,
+) -> Quantity {
+    let n = 1000;
+    let h = (b - a) / n as f64;
+    let eval_at = |x: f64| -> f64 {
+        let mut local_bindings = bindings.clone();
+        local_bindings.insert(var.to_string(), Quantity::new(x, Dim::ZERO));
+        evaluate_single_expr(expr, &local_bindings).map(|q| q.value).unwrap_or(f64::NAN)
+    };
+
+    let mut sum = eval_at(a) + eval_at(b);
+    for i in 1..n {
+        let x = a + i as f64 * h;
+        let val = eval_at(x);
+        if i % 2 == 0 {
+            sum += 2.0 * val;
+        } else {
+            sum += 4.0 * val;
+        }
+    }
+    let integral_value = (h / 3.0) * sum;
+
+    let mut local_bindings = bindings.clone();
+    local_bindings.insert(var.to_string(), Quantity::new(1.0, Dim::ZERO));
+    let inner_dim = evaluate_single_expr(expr, &local_bindings).map(|q| q.dim).unwrap_or(Dim::ZERO);
+
+    Quantity::new(integral_value, inner_dim)
+}
+
+fn format_f64(val: f64) -> String {
+    let s = format!("{:.10}", val);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s.is_empty() || s == "-0" { "0".to_string() } else { s.to_string() }
+}
+
+pub fn expand_calculus(input: &str, bindings: &HashMap<String, Quantity>) -> Result<String, String> {
+    let mut processed = preprocess(input);
+
+    loop {
+        let mut changed = false;
+
+        if let Some((start, end)) = find_func_call(&processed, "deriv") {
+            let inner = &processed[start + 6..end];
+            let parts = split_top_level(inner, ',');
+            if parts.len() == 2 {
+                let expr_str = parts[0].trim();
+                let var = parts[1].trim();
+                let at = bindings.get(var).map(|q| q.value).unwrap_or(0.0);
+                let val = numerical_derivative(expr_str, var, at, bindings);
+                processed.replace_range(start..=end, &format!("({})", format_f64(val.value)));
+                changed = true;
+            } else {
+                return Err("deriv requires (expr, var)".to_string());
+            }
+        } else if let Some((start, end)) = find_func_call(&processed, "integ") {
+            let inner = &processed[start + 6..end];
+            let parts = split_top_level(inner, ',');
+            if parts.len() == 4 {
+                let expr_str = parts[0].trim();
+                let var = parts[1].trim();
+                let a = evaluate_single_expr(parts[2].trim(), bindings).map(|q| q.value).ok_or_else(|| "Invalid integral lower bound".to_string())?;
+                let b = evaluate_single_expr(parts[3].trim(), bindings).map(|q| q.value).ok_or_else(|| "Invalid integral upper bound".to_string())?;
+                let val = numerical_integral(expr_str, var, a, b, bindings);
+                processed.replace_range(start..=end, &format!("({})", format_f64(val.value)));
+                changed = true;
+            } else {
+                return Err("integ requires (expr, var, a, b)".to_string());
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    Ok(processed)
+}
+
 #[derive(Clone, Debug)]
 pub struct QuantityOpsFactory;
 
@@ -340,16 +492,19 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exmex::{Express, FlatEx};
 
     fn eval_str(s: &str) -> Quantity {
-        let processed = preprocess(s);
+        let mut binds = HashMap::new();
+        for (k, v) in default_bindings() {
+            binds.insert(k.to_string(), v);
+        }
+        let processed = expand_calculus(s, &binds).unwrap();
         let expr: FlatEx<Quantity, QuantityOpsFactory> = FlatEx::parse(&processed).unwrap();
         let var_names = expr.var_names();
         let mut vars = Vec::new();
         for name in var_names {
-            if let Some((_, q)) = default_bindings().into_iter().find(|(n, _)| n == &name) {
-                vars.push(q);
+            if let Some(q) = binds.get(name) {
+                vars.push(q.clone());
             } else {
                 panic!("Unknown variable in test: {}", name);
             }
@@ -432,5 +587,17 @@ mod tests {
     fn math_min_dimension_mismatch() {
         let min = eval_str("min(2 m, 3 s)");
         assert!(min.error.is_some());
+    }
+
+    #[test]
+    fn test_expand_calculus_deriv() {
+        let res = expand_calculus("deriv(x^2, x)", &HashMap::new()).unwrap();
+        assert_eq!(res, "(0)");
+    }
+
+    #[test]
+    fn test_expand_calculus_integ() {
+        let res = expand_calculus("integ(x^2, x, 0, 3)", &HashMap::new()).unwrap();
+        assert_eq!(res, "(9)");
     }
 }
