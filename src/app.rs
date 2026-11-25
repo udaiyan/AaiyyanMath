@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 use std::fs;
 use crate::worksheet::Worksheet;
 use crate::python::generate_python;
+use crate::runner::PythonRunner;
 
 const SAVE_FILE: &str = "aaiyyanmath_doc.json";
 
@@ -12,6 +13,10 @@ pub struct MathcadApp {
     active_idx: usize,
     #[serde(skip)]
     status_message: Option<String>,
+    #[serde(skip)]
+    runner: PythonRunner,
+    #[serde(skip)]
+    plot_textures: Vec<egui::TextureHandle>,
 }
 
 impl Default for MathcadApp {
@@ -30,11 +35,39 @@ impl Default for MathcadApp {
             worksheets: vec![Worksheet::new("Scratchpad")],
             active_idx: 0,
             status_message: None,
+            runner: PythonRunner::default(),
+            plot_textures: Vec::new(),
         }
     }
 }
 
 impl MathcadApp {
+    fn load_plot_textures(&mut self, ctx: &egui::Context) {
+        self.plot_textures.clear();
+        let dir = match &self.runner.last {
+            Some(last) => last.plot_dir.clone(),
+            None => return,
+        };
+        let Ok(entries) = fs::read_dir(&dir) else { return };
+        let mut paths: Vec<_> = entries.flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|e| e == "png").unwrap_or(false))
+            .collect();
+        paths.sort();
+        for path in paths {
+            if let Ok(img) = image::open(&path) {
+                let rgba = img.to_rgba8();
+                let size = [rgba.width() as usize, rgba.height() as usize];
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                self.plot_textures.push(ctx.load_texture(
+                    path.to_string_lossy(),
+                    color_image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+        }
+    }
+
     fn save_to_file(&mut self) {
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
@@ -73,6 +106,12 @@ impl MathcadApp {
 
 impl eframe::App for MathcadApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.runner.poll() {
+            self.load_plot_textures(ctx);
+        }
+        if self.runner.running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("AaiyyanMath");
@@ -126,22 +165,73 @@ impl eframe::App for MathcadApp {
             .resizable(true)
             .default_width(400.0)
             .show(ctx, |ui| {
-                ui.heading("Python Code");
+                ui.horizontal(|ui| {
+                    ui.heading("Python");
+                    if ui.add_enabled(!self.runner.running, egui::Button::new("▶ Run")).clicked() {
+                        if let Some(ws) = self.worksheets.get(self.active_idx) {
+                            self.runner.start(ws);
+                        }
+                    }
+                    if self.runner.running {
+                        ui.spinner();
+                        if ui.button("⏹ Cancel").clicked() {
+                            self.runner.cancel();
+                        }
+                    }
+                });
+
+                if let Some(last) = &self.runner.last {
+                    if last.success {
+                        ui.colored_label(egui::Color32::from_rgb(120, 200, 120),
+                                         format!("✅ exit 0 · {:.2?}", last.duration));
+                    } else {
+                        let why = last.problem.clone()
+                            .unwrap_or_else(|| format!("exit {:?}", last.exit_code));
+                        ui.colored_label(egui::Color32::from_rgb(230, 120, 120),
+                                         format!("❌ {} · {:.2?}", why, last.duration));
+                    }
+                }
                 ui.separator();
 
                 if let Some(ws) = self.worksheets.get(self.active_idx) {
                     let code = generate_python(ws);
                     let mut code_view = code.clone();
-
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut code_view)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .interactive(false)
-                        );
-                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt("py_code")
+                        .max_height(ui.available_height() * 0.45)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut code_view)
+                                    .code_editor()
+                                    .desired_width(f32::INFINITY)
+                                    .interactive(false)
+                            );
+                        });
                 }
+
+                ui.separator();
+                ui.strong("Output");
+                egui::ScrollArea::vertical().id_salt("py_output").show(ui, |ui| {
+                    if let Some(last) = &self.runner.last {
+                        if !last.stdout.is_empty() {
+                            ui.monospace(last.stdout.as_str());
+                        }
+                        if !last.stderr.is_empty() {
+                            ui.colored_label(egui::Color32::from_rgb(230, 120, 120), last.stderr.as_str());
+                        }
+                        for tex in &self.plot_textures {
+                            ui.add(
+                                egui::Image::new(egui::load::SizedTexture::new(tex.id(), tex.size_vec2()))
+                                    .max_width(ui.available_width())
+                            );
+                        }
+                        if last.stdout.is_empty() && last.stderr.is_empty() && self.plot_textures.is_empty() {
+                            ui.weak("(no output)");
+                        }
+                    } else {
+                        ui.weak("Press ▶ Run to execute this script with your local Python.");
+                    }
+                });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -171,6 +261,8 @@ mod tests {
             worksheets: vec![Worksheet::new("Scratchpad"), ws2],
             active_idx: 1,
             status_message: None,
+            runner: PythonRunner::default(),
+            plot_textures: Vec::new(),
         }
     }
 

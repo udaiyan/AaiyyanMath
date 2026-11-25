@@ -10,6 +10,7 @@ dependencies = [
  "egui",
  "egui_plot",
  "exmex",
+ "image",
  "regex",
  "serde",
  "serde_json",

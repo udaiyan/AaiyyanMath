@@ -11,3 +11,5 @@ exmex = "0.20"
 regex = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# add to [dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
