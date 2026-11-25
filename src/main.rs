@@ -1,14 +1,15 @@
 mod app;
 mod expression;
 mod plot;
-mod python; // <-- ADD THIS
+mod python;
 mod quantity;
+mod region; 
 mod worksheet;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0]) // Made window wider for the code pane
+            .with_inner_size([1200.0, 800.0])
             .with_title("AaiyyanMath"),
         ..Default::default()
     };

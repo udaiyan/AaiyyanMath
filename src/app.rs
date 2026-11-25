@@ -18,7 +18,6 @@ impl Default for MathcadApp {
 
 impl eframe::App for MathcadApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // --- Left Sidebar (Workspaces) ---
         egui::SidePanel::left("workspace_sidebar")
             .resizable(true)
             .default_width(200.0)
@@ -35,12 +34,8 @@ impl eframe::App for MathcadApp {
                             .text_color(if self.active_idx == i { egui::Color32::LIGHT_BLUE } else { ui.style().visuals.text_color() })
                     );
 
-                    if response.changed() {
-                        ws.name = name;
-                    }
-                    if response.clicked() {
-                        clicked_idx = Some(i);
-                    }
+                    if response.changed() { ws.name = name; }
+                    if response.clicked() { clicked_idx = Some(i); }
                     ui.add_space(2.0);
                 }
 
@@ -56,7 +51,6 @@ impl eframe::App for MathcadApp {
                 }
             });
 
-        // --- Right Sidebar (Python Code) ---
         egui::SidePanel::right("python_code_panel")
             .resizable(true)
             .default_width(400.0)
@@ -73,13 +67,12 @@ impl eframe::App for MathcadApp {
                             egui::TextEdit::multiline(&mut code_view)
                                 .code_editor()
                                 .desired_width(f32::INFINITY)
-                                .interactive(false) // Make it read-only
+                                .interactive(false)
                         );
                     });
                 }
             });
 
-        // --- Main Workspace Area (Mathcad) ---
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(ws) = self.worksheets.get_mut(self.active_idx) {
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -93,6 +86,8 @@ impl eframe::App for MathcadApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::region::Region;
+    use crate::expression::Expression;
 
     #[test]
     fn app_starts_with_one_workspace() {
@@ -113,11 +108,11 @@ mod tests {
     #[test]
     fn workspace_bindings_are_isolated() {
         let mut ws1 = Worksheet::new("WS1");
-        ws1.exprs[0].input = "100".to_owned();
+        if let Region::Math(e) = &mut ws1.regions[1] { e.input = "100".to_owned(); }
         ws1.evaluate_all();
 
         let mut ws2 = Worksheet::new("WS2");
-        ws2.exprs[0].input = "200".to_owned();
+        if let Region::Math(e) = &mut ws2.regions[1] { e.input = "200".to_owned(); }
         ws2.evaluate_all();
 
         assert_eq!(ws1.bindings.get("a").unwrap().value, 100.0);
@@ -128,21 +123,17 @@ mod tests {
     fn switching_workspace_updates_python_output() {
         let mut app = MathcadApp::default();
 
-        // Workspace 1 has default math (a = 2 + 3 * 4)
         let code_ws1 = generate_python(&app.worksheets[0]);
         assert!(code_ws1.contains("a = 2+3*4"));
 
-        // Create a new workspace and change its math
         let mut ws2 = Worksheet::new("WS2");
-        ws2.exprs[0].input = "999 m".to_owned();
+        ws2.regions = vec![Region::Math(Expression::new("x", "999 m"))];
         app.worksheets.push(ws2);
 
-        // Switch to Workspace 2
         app.active_idx = 1;
         let code_ws2 = generate_python(&app.worksheets[app.active_idx]);
 
-        // Verify the Python output changed to match the new workspace
-        assert!(code_ws2.contains("a = 999*m"));
+        assert!(code_ws2.contains("x = 999*m"));
         assert!(!code_ws2.contains("2+3*4"));
     }
 }

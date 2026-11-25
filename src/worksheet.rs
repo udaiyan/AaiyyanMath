@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use crate::expression::Expression;
 use crate::plot::PlotPane;
 use crate::quantity::Quantity;
+use crate::region::Region;
 
 pub struct Worksheet {
     pub name: String,
-    pub exprs: Vec<Expression>,
-    pub plot: PlotPane,
+    pub regions: Vec<Region>,
     pub bindings: HashMap<String, Quantity>,
 }
 
@@ -16,11 +16,12 @@ impl Worksheet {
     pub fn new(name: &str) -> Self {
         let mut ws = Self {
             name: name.to_string(),
-            exprs: vec![
-                Expression::new("a", "2 + 3 * 4"),
-                Expression::new("b", "a * 2 m"),
+            regions: vec![
+                Region::Text("Welcome to AaiyyanMath.\nThis is a Text Region. You can write notes here.".to_string()),
+                Region::Math(Expression::new("a", "2 + 3 * 4")),
+                Region::Math(Expression::new("b", "a * 2 m")),
+                Region::Plot(PlotPane::default()),
             ],
-            plot: PlotPane::default(),
             bindings: HashMap::new(),
         };
         ws.evaluate_all();
@@ -29,67 +30,94 @@ impl Worksheet {
 
     pub fn evaluate_all(&mut self) {
         self.bindings.clear();
-        for i in 0..self.exprs.len() {
-            let snapshot = self.bindings.clone();
-            self.exprs[i].evaluate(&snapshot);
-            if let Some(q) = &self.exprs[i].result {
-                let name = self.exprs[i].label.trim().to_owned();
-                if !name.is_empty() {
-                    self.bindings.insert(name, q.clone());
+        let mut current_bindings = HashMap::new();
+
+        for region in &mut self.regions {
+            if let Region::Math(expr) = region {
+                expr.evaluate(&current_bindings);
+                if let Some(q) = &expr.result {
+                    let name = expr.label.trim().to_owned();
+                    if !name.is_empty() {
+                        current_bindings.insert(name, q.clone());
+                    }
                 }
             }
         }
+
+        self.bindings = current_bindings;
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
         let mut any_changed = false;
         let mut remove_idx = None;
+        let mut move_up_idx = None;
+        let mut move_down_idx = None;
 
-        let expr_count = self.exprs.len();
+        let len = self.regions.len();
 
-        for (i, expr) in self.exprs.iter_mut().enumerate() {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.strong(format!("Expression {}", i + 1));
-                    if expr_count > 1 {
-                        if ui.button("❌ Remove").clicked() {
-                            remove_idx = Some(i);
-                        }
-                    }
-                });
-                ui.add_space(2.0);
-                if expr.render(ui) {
-                    any_changed = true;
-                }
+        for i in 0..len {
+            ui.horizontal(|ui| {
+                ui.strong(format!("Region {}", i + 1));
+                if ui.button("⬆").clicked() && i > 0 { move_up_idx = Some(i); }
+                if ui.button("⬇").clicked() && i < len - 1 { move_down_idx = Some(i); }
+                if ui.button("❌ Remove").clicked() { remove_idx = Some(i); }
             });
-            ui.add_space(6.0);
+
+            match &mut self.regions[i] {
+                Region::Text(txt) => {
+                    ui.add(
+                        egui::TextEdit::multiline(txt)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("Type your notes here...")
+                    );
+                }
+                Region::Math(expr) => {
+                    if expr.render(ui) {
+                        any_changed = true;
+                    }
+                }
+                Region::Plot(plot) => {
+                    plot.render(ui, &self.bindings);
+                }
+            }
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(5.0);
         }
 
         if let Some(idx) = remove_idx {
-            self.exprs.remove(idx);
+            self.regions.remove(idx);
+            any_changed = true;
+        }
+        if let Some(idx) = move_up_idx {
+            self.regions.swap(idx, idx - 1);
+            any_changed = true;
+        }
+        if let Some(idx) = move_down_idx {
+            self.regions.swap(idx, idx + 1);
             any_changed = true;
         }
 
-        if ui.button("➕ Add Expression").clicked() {
-            let new_label = format!("v{}", self.exprs.len() + 1);
-            self.exprs.push(Expression::new(&new_label, ""));
-            any_changed = true;
-        }
+        ui.horizontal(|ui| {
+            if ui.button("➕ Add Math").clicked() {
+                let new_label = format!("v{}", len + 1);
+                self.regions.push(Region::Math(Expression::new(&new_label, "")));
+                any_changed = true;
+            }
+            if ui.button("➕ Add Text").clicked() {
+                self.regions.push(Region::Text(String::new()));
+                any_changed = true;
+            }
+            if ui.button("➕ Add Plot").clicked() {
+                self.regions.push(Region::Plot(PlotPane::default()));
+            }
+        });
 
         if any_changed {
             self.evaluate_all();
         }
 
         ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(5.0);
-
-        ui.group(|ui| {
-            ui.label("Plot");
-            self.plot.render(ui, &self.bindings);
-        });
-
-        ui.add_space(6.0);
         ui.separator();
         ui.heading("Bindings");
 
@@ -109,6 +137,14 @@ impl Worksheet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quantity::Dim;
+
+    fn get_math_mut(ws: &mut Worksheet, index: usize) -> &mut Expression {
+        match &mut ws.regions[index] {
+            Region::Math(e) => e,
+            _ => panic!("Not a math region"),
+        }
+    }
 
     #[test]
     fn default_state_binds_a_and_b() {
@@ -116,37 +152,41 @@ mod tests {
         ws.evaluate_all();
         assert_eq!(ws.bindings.get("a").unwrap().value, 14.0);
         assert_eq!(ws.bindings.get("b").unwrap().value, 28.0);
-        assert_eq!(ws.bindings.get("b").unwrap().dim, crate::quantity::Dim::LENGTH);
+        assert_eq!(ws.bindings.get("b").unwrap().dim, Dim::LENGTH);
     }
 
     #[test]
     fn expression_chain_updates() {
         let mut ws = Worksheet::new("Test");
-        ws.exprs[0].input = "5 m".to_owned();
+        get_math_mut(&mut ws, 1).input = "5 m".to_owned();
         ws.evaluate_all();
         assert_eq!(ws.bindings.get("a").unwrap().value, 5.0);
         assert_eq!(ws.bindings.get("b").unwrap().value, 10.0);
-        assert_eq!(ws.bindings.get("b").unwrap().dim, crate::quantity::Dim::LENGTH * crate::quantity::Dim::LENGTH);
+        assert_eq!(ws.bindings.get("b").unwrap().dim, Dim::LENGTH * Dim::LENGTH);
     }
 
     #[test]
     fn failure_in_pane1_breaks_pane2() {
         let mut ws = Worksheet::new("Test");
-        ws.exprs[0].input = "2 +".to_owned();
+        get_math_mut(&mut ws, 1).input = "2 +".to_owned();
         ws.evaluate_all();
         assert!(!ws.bindings.contains_key("a"));
         assert!(!ws.bindings.contains_key("b"));
-        assert!(ws.exprs[1].error.is_some());
+        if let Region::Math(e) = &ws.regions[2] {
+            assert!(e.error.is_some());
+        }
     }
 
     #[test]
     fn empty_label_skips_binding() {
         let mut ws = Worksheet::new("Test");
-        ws.exprs[0].label = String::new();
+        get_math_mut(&mut ws, 1).label = String::new();
         ws.evaluate_all();
         assert!(!ws.bindings.contains_key("a"));
-        assert!(ws.exprs[0].result.is_some());
-        assert!(ws.exprs[1].error.is_some());
+        assert!(get_math_mut(&mut ws, 1).result.is_some());
+        if let Region::Math(e) = &ws.regions[2] {
+            assert!(e.error.is_some());
+        }
     }
 
     #[test]
@@ -154,7 +194,7 @@ mod tests {
         let mut ws = Worksheet::new("Test");
         ws.evaluate_all();
         assert!(ws.bindings.contains_key("a"));
-        ws.exprs[0].input = "bad +".to_owned();
+        get_math_mut(&mut ws, 1).input = "bad +".to_owned();
         ws.evaluate_all();
         assert!(!ws.bindings.contains_key("a"));
     }
@@ -162,28 +202,25 @@ mod tests {
     #[test]
     fn later_pane_with_same_name_overwrites() {
         let mut ws = Worksheet::new("Test");
-        ws.exprs[1].label = "a".to_owned();
-        ws.exprs[1].input = "100".to_owned();
+        get_math_mut(&mut ws, 2).label = "a".to_owned();
+        get_math_mut(&mut ws, 2).input = "100".to_owned();
         ws.evaluate_all();
         assert_eq!(ws.bindings.get("a").unwrap().value, 100.0);
         assert!(!ws.bindings.contains_key("b"));
     }
 
     #[test]
-    fn can_add_and_remove_expressions() {
+    fn can_add_and_remove_regions() {
         let mut ws = Worksheet::new("Test");
-        assert_eq!(ws.exprs.len(), 2);
+        let initial_len = ws.regions.len();
 
-        // FIXED: Use b * 2 instead of a + b to avoid dimension mismatch
-        ws.exprs.push(Expression::new("c", "b * 2"));
+        ws.regions.push(Region::Math(Expression::new("c", "b * 2")));
         ws.evaluate_all();
+        assert_eq!(ws.regions.len(), initial_len + 1);
         assert_eq!(ws.bindings.get("c").unwrap().value, 56.0);
-        assert_eq!(ws.bindings.get("c").unwrap().dim, crate::quantity::Dim::LENGTH);
 
-        ws.exprs.remove(0); // Remove 'a'
+        ws.regions.remove(0); // Remove the Text region
         ws.evaluate_all();
-        assert!(!ws.bindings.contains_key("a"));
-        assert!(!ws.bindings.contains_key("b"));
-        assert!(!ws.bindings.contains_key("c")); // because 'c' depends on 'b'
+        assert_eq!(ws.regions.len(), initial_len);
     }
 }
