@@ -104,24 +104,25 @@ impl PlotPane {
             local_bindings.entry(name.to_string()).or_insert(q);
         }
 
-        let processed = match crate::quantity::expand_calculus(&key.expr, &local_bindings) {
-            Ok(p) => p,
-            Err(e) => {
-                self.error = Some(e);
-                return;
-            }
-        };
+        // deriv/integ results depend on the CURRENT value of the plot variable,
+        // so calculus must be expanded per sample with the variable bound to that
+        // sample. Without calculus, keep the fast path: parse once, eval per sample.
+        let preprocessed = crate::quantity::preprocess(&key.expr);
+        let has_calculus = preprocessed.contains("deriv(") || preprocessed.contains("integ(");
 
-        let expr: FlatEx<Quantity, QuantityOpsFactory> = match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
-            Ok(e) => e,
-            Err(e) => {
-                self.error = Some(format!("Parse error: {}", e));
-                return;
+        let cached: Option<FlatEx<Quantity, QuantityOpsFactory>> = if has_calculus {
+            None
+        } else {
+            match FlatEx::<Quantity, QuantityOpsFactory>::parse(&preprocessed) {
+                Ok(e) => Some(e),
+                Err(e) => {
+                    self.error = Some(format!("Parse error: {}", e));
+                    return;
+                }
             }
         };
 
         let n = key.samples.max(2);
-        let var_names = expr.var_names();
         let mut first_err: Option<String> = None;
         let mut points: Vec<[f64; 2]> = Vec::with_capacity(n);
 
@@ -129,8 +130,36 @@ impl PlotPane {
             let t = i as f64 / (n - 1) as f64;
             let x = key.x_min + (key.x_max - key.x_min) * t;
 
+            // Calculus path builds a fresh expression for this sample;
+            // the fast path leaves this None and reuses `cached`.
+            let sample_expr: Option<FlatEx<Quantity, QuantityOpsFactory>> = if has_calculus {
+                let mut sb = local_bindings.clone();
+                sb.insert(key.var.clone(), Quantity::new(x, crate::quantity::Dim::ZERO));
+                let processed = match crate::quantity::expand_calculus(&key.expr, &sb) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        if first_err.is_none() { first_err = Some(e); }
+                        continue;
+                    }
+                };
+                match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
+                    Ok(e) => Some(e),
+                    Err(e) => {
+                        if first_err.is_none() { first_err = Some(format!("Parse error: {}", e)); }
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+
+            let expr: &FlatEx<Quantity, QuantityOpsFactory> = match sample_expr.as_ref() {
+                Some(e) => e,
+                None => cached.as_ref().unwrap(),
+            };
+
             let mut vars = Vec::new();
-            for name in var_names {
+            for name in expr.var_names() {
                 if name == &key.var {
                     vars.push(Quantity::new(x, crate::quantity::Dim::ZERO));
                 } else if let Some(q) = local_bindings.get(name) {
@@ -256,7 +285,33 @@ mod tests {
         let mut p = PlotPane::default();
         let key = make_key("deriv(x^2, x)", 0.0, 10.0, 11, &[]);
         p.rebuild(&key);
-        assert!(p.error.is_none());
+        assert!(p.error.is_none(), "Expected no error, got: {:?}", p.error);
         assert_eq!(p.points.len(), 11);
+        // d/dx x^2 = 2x at each sample (central difference is exact for quadratics)
+        assert!((p.points[0][1] - 0.0).abs() < 1e-6);
+        assert!((p.points[5][1] - 10.0).abs() < 1e-6);
+        assert!((p.points[10][1] - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn plot_axis_variable_overrides_binding() {
+        let mut p = PlotPane::default();
+        let key = make_key("deriv(x^2, x)", 0.0, 4.0, 5, &[("x", 100.0)]);
+        p.rebuild(&key);
+        assert!(p.error.is_none());
+        // the axis value wins over the worksheet binding x = 100
+        assert!((p.points[4][1] - 8.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn plot_integral_with_variable_bound() {
+        let mut p = PlotPane::default();
+        let key = make_key("integ(t^2, t, 0, x)", 0.0, 3.0, 4, &[]);
+        p.rebuild(&key);
+        assert!(p.error.is_none(), "Expected no error, got: {:?}", p.error);
+        assert_eq!(p.points.len(), 4);
+        // integral of t^2 from 0 to x = x^3/3 (Simpson is exact for quadratics)
+        assert!((p.points[1][1] - 1.0 / 3.0).abs() < 1e-6);
+        assert!((p.points[3][1] - 9.0).abs() < 1e-6);
     }
 }
