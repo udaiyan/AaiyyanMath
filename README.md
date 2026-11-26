@@ -1,30 +1,105 @@
 # AaiyyanMath
 
-A Mathcad-like math app prototype built with Rust, egui and meval.
+A Mathcad-inspired worksheet math app built with Rust, [egui/eframe](https://github.com/emilk/egui)
+and [exmex](https://crates.io/crates/exmex). Write math regions top-to-bottom, bind results
+with `name := expression`, carry SI units through every calculation, take numerical
+derivatives and integrals, plot live — and export or run the whole worksheet as Python.
 
 ## Run
 
-    cargo run
+```bash
+cargo run
+```
 
-## Milestones
+The Python pane (▶ Run) executes the generated script with your local Python 3.
+It needs these packages:
 
-1. Expression evaluator (done). Single input, meval::eval_str result.
-2. Second expression. Uncomment scaffolding in src/app.rs.
-3. Plot. Implement src/plot.rs with egui_plot.
-4. Units. Implement src/units.rs with uom.
+```bash
+pip install numpy pint matplotlib
+```
 
-## Swapping in a CAS
+If Python or a package is missing, the output panel tells you — the Rust engine
+works fully offline without Python.
 
-meval handles numeric expressions. For symbolic CAS features
-(calculus, simplification, equation solving) swap the
-evaluate_expression function in src/app.rs for Symbolica or symplex:
+## Worksheets
 
-    cargo add symbolica
-    cargo add symplex
+- **Workspaces** (left sidebar): independent worksheets, rename inline, add new ones.
+- **Regions** (center): Text notes, Math (`name := expr`), and Plots. Reorder ⬆⬇ / remove ❌.
+- Math regions evaluate **top-down**: a region can use any name bound above it.
+  Errors break the chain below them, exactly like Mathcad. Empty name = anonymous
+  result (printed, not bound).
 
-## Long-term architecture
+## Units engine (`src/quantity.rs`)
 
-The modular layout (app, expression, plot, units) is designed to
-grow into a folder-based Mathcad/MATLAB-style workspace with
-separate worksheets, a Python-code pane, and domain modules
-(calculus, electronics, etc.).
+Every value is a `Quantity { value, dim }` with a 7-exponent SI dimension vector
+(kg, m, s, A, K, mol, cd). Addition/subtraction require matching dimensions;
+multiplication/division compose them; transcendental functions require
+dimensionless arguments.
+
+- Base units: `m s kg A K mol cd`; prefixed: `km cm mm g ms us ns`; constants `pi e`.
+- Implicit multiplication: `5 m`, `2(x)`, `3 sin(x)`.
+- Integer powers (`x^2`), `sqrt` halves dimensions, `min`/`max` require matching dims.
+
+```text
+v := 5 m / (2 s)      →  2.5 m·s^-1
+bad := 2 + 3 m        →  Dimension mismatch
+```
+
+**Known quirk (fix planned):** juxtaposition currently binds at the same precedence
+as `*` and `/`, so `5 m / 2 s` parses as `(5·m/2)·s = 2.5 m·s`, not `2.5 m/s`.
+Parenthesize denominators until this is addressed.
+
+## Calculus (numerical)
+
+- `deriv(expr, var)` — central difference (h = 1e-5), evaluated at `var`'s current
+  binding (0 if unbound).
+- `integ(expr, var, a, b)` — composite Simpson, 1000 slices; bounds may be expressions.
+- In **plots**, calculus is expanded per sample, so `deriv(x^2, x)` draws `2x` across
+  the axis range.
+
+## Python pane
+
+The right panel generates a standalone script (numpy + pint + matplotlib, headless
+Agg) mirroring the worksheet: comments for text regions, assignments + prints for
+math, `savefig` PNGs for plots. ▶ Run executes it in a subprocess (30 s timeout,
+cancel button); stdout/stderr and the rendered plots appear inline. Calculus maps
+to generated `_deriv`/`_integ` helpers — no scipy needed, and plot expressions
+evaluate over the whole linspace.
+
+## Persistence
+
+Save/Load buttons write `aaiyyanmath_doc.json` in the working directory, which is
+auto-loaded on startup.
+
+## Architecture
+
+| File | Role |
+|---|---|
+| `src/main.rs` | eframe bootstrap |
+| `src/app.rs` | app state, panels, save/load, Python pane, plot textures |
+| `src/worksheet.rs` | region list, top-down evaluation, bindings |
+| `src/region.rs` | Text / Math / Plot enum (serde) |
+| `src/expression.rs` | one math region: parse → evaluate → render |
+| `src/quantity.rs` | dimensions, units, implicit-mult preprocessing, numerical calculus, exmex operators |
+| `src/plot.rs` | egui_plot pane with per-sample calculus and caching |
+| `src/python.rs` | worksheet → Python code generation |
+| `src/runner.rs` | subprocess execution: timeout, cancel, output capture |
+
+## Development
+
+```bash
+cargo test --workspace          # unit tests across all modules
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+CI (GitHub Actions) runs tests on Ubuntu + Windows; fmt/clippy are gating.
+
+## Roadmap
+
+- Mathcad semantics for juxtaposition precedence; non-finite calculus guards
+- Derived units (N, J, W, Pa, Hz, V, Ω…), fractional exponents, variadic min/max, `root(f, x, guess)`
+- Range variables, vectors, matrices
+- Symbolic CAS (Symbolica) with the numerical engine as fallback
+- 2D WYSIWYG equation editing, real file dialogs, undo/redo
+- Packaging/installers
