@@ -1,5 +1,6 @@
 mod app;
 mod expression;
+mod label;
 mod plot;
 mod python;
 mod quantity;

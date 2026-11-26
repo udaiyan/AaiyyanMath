@@ -42,7 +42,7 @@ impl Worksheet {
                 expr.evaluate(&current_bindings);
                 if let Some(q) = &expr.result {
                     let name = expr.label.trim().to_owned();
-                    if !name.is_empty() {
+                    if !name.is_empty() && crate::label::is_valid_label(&name) {
                         current_bindings.insert(name, q.clone());
                     }
                 }
@@ -234,5 +234,40 @@ mod tests {
         ws.regions.remove(0);
         ws.evaluate_all();
         assert_eq!(ws.regions.len(), initial_len);
+    }
+
+    #[test]
+    fn invalid_label_is_not_bound_and_breaks_downstream() {
+        let mut ws = Worksheet::new("Test");
+        get_math_mut(&mut ws, 1).label = "bad name".to_owned();
+        ws.evaluate_all();
+        assert!(!ws.bindings.contains_key("bad name"));
+        assert!(!ws.bindings.contains_key("a"));
+        if let Region::Math(e) = &ws.regions[2] {
+            assert!(e.error.as_ref().unwrap().contains("Unknown variable"));
+        }
+    }
+
+    #[test]
+    fn invalid_label_does_not_poison_other_bindings() {
+        let mut ws = Worksheet::new("Test");
+        ws.regions = vec![
+            Region::Math(Expression::new("ok", "7")),
+            Region::Math(Expression::new("class", "8")),
+            Region::Math(Expression::new("c", "ok * 2")),
+        ];
+        ws.evaluate_all();
+        assert_eq!(ws.bindings.get("ok").unwrap().value, 7.0);
+        assert_eq!(ws.bindings.get("c").unwrap().value, 14.0);
+        assert!(!ws.bindings.contains_key("class"));
+    }
+
+    #[test]
+    fn trimmed_label_binds_under_trimmed_name() {
+        let mut ws = Worksheet::new("Test");
+        get_math_mut(&mut ws, 1).label = "  a  ".to_owned();
+        ws.evaluate_all();
+        assert_eq!(ws.bindings.get("a").unwrap().value, 14.0);
+        assert_eq!(ws.bindings.get("b").unwrap().value, 28.0);
     }
 }

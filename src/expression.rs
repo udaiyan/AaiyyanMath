@@ -28,6 +28,11 @@ impl Expression {
         self.result = None;
         self.error = None;
 
+        if let Err(e) = crate::label::validate_label(self.label.trim()) {
+            self.error = Some(format!("Invalid label: {e}"));
+            return;
+        }
+
         if self.input.trim().is_empty() {
             return;
         }
@@ -248,5 +253,41 @@ mod tests {
         let mut e = Expression::new("i", "integ(x^2, x, 0, 3)");
         e.evaluate(&h(&[]));
         assert!((e.result.unwrap().value - 9.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn invalid_label_blocks_result_and_sets_error() {
+        for label in ["my var", "class", "2x", "a-b", "x'; import os; #", "np"] {
+            let mut e = Expression::new(label, "2 + 2");
+            e.evaluate(&h(&[]));
+            assert!(e.result.is_none(), "label {label:?} produced a result");
+            assert!(e.error.as_ref().unwrap().contains("Invalid label"));
+        }
+    }
+
+    #[test]
+    fn fixing_label_clears_error_and_evaluates() {
+        let mut e = Expression::new("bad name", "2 + 2");
+        e.evaluate(&h(&[]));
+        assert!(e.error.is_some());
+        e.label = "good_name".to_owned();
+        e.evaluate(&h(&[]));
+        assert_eq!(e.result.unwrap().value, 4.0);
+        assert!(e.error.is_none());
+    }
+
+    #[test]
+    fn label_is_validated_after_trimming() {
+        let mut e = Expression::new("  a  ", "2 + 2");
+        e.evaluate(&h(&[]));
+        assert!(e.error.is_none());
+        assert_eq!(e.result.unwrap().value, 4.0);
+    }
+
+    #[test]
+    fn invalid_label_errors_even_on_empty_input() {
+        let mut e = Expression::new("class", "");
+        e.evaluate(&h(&[]));
+        assert!(e.error.is_some());
     }
 }

@@ -61,14 +61,23 @@ pub fn generate_python(ws: &Worksheet) -> String {
                 if expr.input.trim().is_empty() {
                     continue;
                 }
+                let label = expr.label.trim();
+                if crate::label::validate_label(label).is_err() {
+                    // Fixed text only — never echo the raw label into the script.
+                    code.push_str(&format!(
+                        "# Skipped math region {}: invalid label\n\n",
+                        i + 1
+                    ));
+                    continue;
+                }
                 code.push_str(&format!("# Math Region {}\n", i + 1));
                 let py_input = to_python(&expr.input);
 
-                if expr.label.trim().is_empty() {
+                if label.is_empty() {
                     code.push_str(&format!("print({})\n", py_input));
                 } else {
-                    code.push_str(&format!("{} = {}\n", expr.label, py_input));
-                    code.push_str(&format!("print('{} =', {})\n", expr.label, expr.label));
+                    code.push_str(&format!("{} = {}\n", label, py_input));
+                    code.push_str(&format!("print('{} =', {})\n", label, label));
                 }
                 code.push('\n');
             }
@@ -76,9 +85,13 @@ pub fn generate_python(ws: &Worksheet) -> String {
                 if plot.expr.trim().is_empty() {
                     continue;
                 }
+                let var = plot.var.trim();
+                if crate::label::validate_identifier(var).is_err() {
+                    // Fixed text only — never echo the raw variable name into the script.
+                    code.push_str("# Skipped plot region: invalid variable name\n\n");
+                    continue;
+                }
                 code.push_str("# Plot Region\n");
-                let var = &plot.var;
-
                 code.push_str(&format!(
                     "{} = np.linspace({}, {}, {})\n",
                     var, plot.x_min, plot.x_max, plot.samples
@@ -353,5 +366,84 @@ mod tests {
             to_python_ctx("deriv(t^2, t)", Some("x")),
             "_deriv(lambda t: t**2, globals().get(\"t\", 0.0))"
         );
+    }
+
+    #[test]
+    fn invalid_labels_are_skipped_with_comment() {
+        for label in ["my var", "class", "2x", "a-b", "np", "lambda"] {
+            let ws = make_math_ws(label, "2 + 2");
+            let code = generate_python(&ws);
+            assert!(
+                code.contains("# Skipped math region 1: invalid label"),
+                "label {label:?} not skipped"
+            );
+            assert!(!code.contains("2+2"), "label {label:?} leaked code");
+        }
+    }
+
+    #[test]
+    fn injection_payloads_never_reach_the_script() {
+        for label in [
+            "x'; import os; #",
+            "a\nimport os",
+            "x\"; __import__('os'); #",
+        ] {
+            let ws = make_math_ws(label, "2 + 2");
+            let code = generate_python(&ws);
+            assert!(!code.contains("import os"), "payload executed for {label:?}");
+            assert!(!code.contains("__import__"));
+            assert!(!code.contains(label), "raw label echoed for {label:?}");
+        }
+    }
+
+    #[test]
+    fn every_python_keyword_label_is_skipped() {
+        for kw in crate::label::PYTHON_KEYWORDS {
+            let ws = make_math_ws(kw, "1");
+            let code = generate_python(&ws);
+            assert!(
+                !code.contains(&format!("{kw} =")),
+                "keyword {kw} assigned"
+            );
+        }
+    }
+
+    #[test]
+    fn trimmed_and_underscore_labels_emit_assignments() {
+        let code = generate_python(&make_math_ws("  a  ", "5 m"));
+        assert!(code.contains("a = 5*m"));
+        assert!(code.contains("print('a =', a)"));
+        let code = generate_python(&make_math_ws("_x1", "3"));
+        assert!(code.contains("_x1 = 3"));
+    }
+
+    #[test]
+    fn invalid_plot_vars_are_skipped() {
+        for var in ["x y", "for", "", "2t", "x;import os"] {
+            let mut ws = Worksheet::new("Test");
+            let mut plot = crate::plot::PlotPane::default();
+            plot.var = var.to_owned();
+            ws.regions = vec![Region::Plot(plot)];
+            let code = generate_python(&ws);
+            assert!(code.contains("# Skipped plot region"), "var {var:?}");
+            assert!(!code.contains("plt.plot("), "var {var:?} leaked plot code");
+            assert!(
+                !code.contains("plt.savefig"),
+                "var {var:?} leaked plot code"
+            );
+            assert!(!code.contains("import os"));
+        }
+    }
+
+    #[test]
+    fn valid_plot_var_still_generates() {
+        let mut ws = Worksheet::new("Test");
+        let mut plot = crate::plot::PlotPane::default();
+        plot.var = " t ".to_owned();
+        plot.expr = "t^2".to_owned();
+        ws.regions = vec![Region::Plot(plot)];
+        let code = generate_python(&ws);
+        assert!(code.contains("t = np.linspace("));
+        assert!(code.contains("plt.plot(t, y)"));
     }
 }

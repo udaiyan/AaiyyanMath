@@ -106,6 +106,12 @@ impl PlotPane {
         self.points.clear();
         self.error = None;
 
+        let var = key.var.trim();
+        if let Err(e) = crate::label::validate_identifier(var) {
+            self.error = Some(format!("Invalid plot variable: {e}"));
+            return;
+        }
+
         let mut local_bindings: HashMap<String, Quantity> = key.bindings.iter().cloned().collect();
         for (name, q) in crate::quantity::default_bindings() {
             local_bindings.entry(name.to_string()).or_insert(q);
@@ -142,7 +148,7 @@ impl PlotPane {
             let sample_expr: Option<FlatEx<Quantity, QuantityOpsFactory>> = if has_calculus {
                 let mut sb = local_bindings.clone();
                 sb.insert(
-                    key.var.clone(),
+                    var.to_string(),
                     Quantity::new(x, crate::quantity::Dim::ZERO),
                 );
                 let processed = match crate::quantity::expand_calculus(&key.expr, &sb) {
@@ -174,7 +180,7 @@ impl PlotPane {
 
             let mut vars = Vec::new();
             for name in expr.var_names() {
-                if name == &key.var {
+                if name.as_str() == var {
                     vars.push(Quantity::new(x, crate::quantity::Dim::ZERO));
                 } else if let Some(q) = local_bindings.get(name) {
                     vars.push(q.clone());
@@ -330,5 +336,20 @@ mod tests {
         // integral of t^2 from 0 to x = x^3/3 (Simpson is exact for quadratics)
         assert!((p.points[1][1] - 1.0 / 3.0).abs() < 1e-6);
         assert!((p.points[3][1] - 9.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn invalid_plot_variable_sets_error_and_no_points() {
+        for var in ["x y", "class", "", "2x"] {
+            let mut p = PlotPane::default();
+            let mut key = make_key("x", 0.0, 1.0, 5, &[]);
+            key.var = var.to_owned();
+            p.rebuild(&key);
+            assert!(
+                p.error.as_ref().unwrap().contains("Invalid plot variable"),
+                "var {var:?}"
+            );
+            assert!(p.points.is_empty());
+        }
     }
 }
