@@ -1,6 +1,6 @@
-use crate::worksheet::Worksheet;
 use crate::quantity::{preprocess, split_top_level};
 use crate::region::Region;
+use crate::worksheet::Worksheet;
 use regex::Regex;
 
 pub fn generate_python(ws: &Worksheet) -> String {
@@ -49,14 +49,18 @@ pub fn generate_python(ws: &Worksheet) -> String {
     for (i, region) in ws.regions.iter().enumerate() {
         match region {
             Region::Text(txt) => {
-                if txt.trim().is_empty() { continue; }
+                if txt.trim().is_empty() {
+                    continue;
+                }
                 for line in txt.lines() {
                     code.push_str(&format!("# {}\n", line));
                 }
                 code.push('\n');
             }
             Region::Math(expr) => {
-                if expr.input.trim().is_empty() { continue; }
+                if expr.input.trim().is_empty() {
+                    continue;
+                }
                 code.push_str(&format!("# Math Region {}\n", i + 1));
                 let py_input = to_python(&expr.input);
 
@@ -69,11 +73,16 @@ pub fn generate_python(ws: &Worksheet) -> String {
                 code.push('\n');
             }
             Region::Plot(plot) => {
-                if plot.expr.trim().is_empty() { continue; }
+                if plot.expr.trim().is_empty() {
+                    continue;
+                }
                 code.push_str("# Plot Region\n");
                 let var = &plot.var;
 
-                code.push_str(&format!("{} = np.linspace({}, {}, {})\n", var, plot.x_min, plot.x_max, plot.samples));
+                code.push_str(&format!(
+                    "{} = np.linspace({}, {}, {})\n",
+                    var, plot.x_min, plot.x_max, plot.samples
+                ));
                 code.push_str(&format!("y = {}\n", to_python_ctx(&plot.expr, Some(var))));
                 code.push_str("y = getattr(y, \"magnitude\", y)  # strip units for plotting\n");
                 code.push_str(&format!("plt.plot({}, y)\n", var));
@@ -107,12 +116,23 @@ fn to_python_ctx(expr: &str, plot_var: Option<&str>) -> String {
             let start = i + 6;
             let mut depth = 1;
             let mut end = start;
-            for j in start..chars.len() {
-                if chars[j] == '(' { depth += 1; }
-                if chars[j] == ')' { depth -= 1; if depth == 0 { end = j; break; } }
+            for (j, &ch) in chars.iter().enumerate().skip(start) {
+                if ch == '(' {
+                    depth += 1;
+                }
+                if ch == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = j;
+                        break;
+                    }
+                }
             }
             let inner: String = chars[start..end].iter().collect();
-            let parts = split_top_level(&inner, ',').iter().map(|s| s.trim()).collect::<Vec<_>>();
+            let parts = split_top_level(&inner, ',')
+                .iter()
+                .map(|s| s.trim())
+                .collect::<Vec<_>>();
             if parts.len() == 2 {
                 let var = parts[1];
                 let at = if plot_var == Some(var) {
@@ -120,7 +140,12 @@ fn to_python_ctx(expr: &str, plot_var: Option<&str>) -> String {
                 } else {
                     format!("globals().get(\"{}\", 0.0)", var)
                 };
-                out.push_str(&format!("_deriv(lambda {}: {}, {})", var, to_python_ctx(parts[0], plot_var), at));
+                out.push_str(&format!(
+                    "_deriv(lambda {}: {}, {})",
+                    var,
+                    to_python_ctx(parts[0], plot_var),
+                    at
+                ));
                 i = end + 1;
                 continue;
             }
@@ -128,14 +153,31 @@ fn to_python_ctx(expr: &str, plot_var: Option<&str>) -> String {
             let start = i + 6;
             let mut depth = 1;
             let mut end = start;
-            for j in start..chars.len() {
-                if chars[j] == '(' { depth += 1; }
-                if chars[j] == ')' { depth -= 1; if depth == 0 { end = j; break; } }
+            for (j, &ch) in chars.iter().enumerate().skip(start) {
+                if ch == '(' {
+                    depth += 1;
+                }
+                if ch == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = j;
+                        break;
+                    }
+                }
             }
             let inner: String = chars[start..end].iter().collect();
-            let parts = split_top_level(&inner, ',').iter().map(|s| s.trim()).collect::<Vec<_>>();
+            let parts = split_top_level(&inner, ',')
+                .iter()
+                .map(|s| s.trim())
+                .collect::<Vec<_>>();
             if parts.len() == 4 {
-                out.push_str(&format!("_integ(lambda {}: {}, {}, {})", parts[1], to_python_ctx(parts[0], plot_var), parts[2], parts[3]));
+                out.push_str(&format!(
+                    "_integ(lambda {}: {}, {}, {})",
+                    parts[1],
+                    to_python_ctx(parts[0], plot_var),
+                    parts[2],
+                    parts[3]
+                ));
                 i = end + 1;
                 continue;
             }
@@ -149,21 +191,38 @@ fn to_python_ctx(expr: &str, plot_var: Option<&str>) -> String {
     s = s.replace("^", "**");
 
     // 3. Map standard functions
-    let re = Regex::new(r"\b(sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|ln|log|exp|sqrt|abs|floor|ceil|round|min|max)\(").unwrap();
-    s = re.replace_all(&s, |caps: &regex::Captures| {
-        let func = &caps[1];
-        let py_func = match func {
-            "sin" => "np.sin", "cos" => "np.cos", "tan" => "np.tan",
-            "asin" => "np.arcsin", "acos" => "np.arccos", "atan" => "np.arctan",
-            "sinh" => "np.sinh", "cosh" => "np.cosh", "tanh" => "np.tanh",
-            "ln" => "np.log", "log" => "np.log10", "exp" => "np.exp",
-            "sqrt" => "np.sqrt", "abs" => "np.abs", "floor" => "np.floor",
-            "ceil" => "np.ceil", "round" => "np.round",
-            "min" => "np.minimum", "max" => "np.maximum",
-            _ => func,
-        };
-        format!("{}(", py_func)
-    }).to_string();
+    let re = Regex::new(
+        r"\b(sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|ln|log|exp|sqrt|abs|floor|ceil|round|min|max)\(",
+    )
+        .unwrap();
+    s = re
+        .replace_all(&s, |caps: &regex::Captures| {
+            let func = &caps[1];
+            let py_func = match func {
+                "sin" => "np.sin",
+                "cos" => "np.cos",
+                "tan" => "np.tan",
+                "asin" => "np.arcsin",
+                "acos" => "np.arccos",
+                "atan" => "np.arctan",
+                "sinh" => "np.sinh",
+                "cosh" => "np.cosh",
+                "tanh" => "np.tanh",
+                "ln" => "np.log",
+                "log" => "np.log10",
+                "exp" => "np.exp",
+                "sqrt" => "np.sqrt",
+                "abs" => "np.abs",
+                "floor" => "np.floor",
+                "ceil" => "np.ceil",
+                "round" => "np.round",
+                "min" => "np.minimum",
+                "max" => "np.maximum",
+                _ => func,
+            };
+            format!("{}(", py_func)
+        })
+        .to_string();
 
     s
 }
@@ -273,14 +332,26 @@ mod tests {
 
     #[test]
     fn test_to_python_calculus() {
-        assert_eq!(to_python("deriv(x^2, x)"), "_deriv(lambda x: x**2, globals().get(\"x\", 0.0))");
-        assert_eq!(to_python("integ(x^2, x, 0, 3)"), "_integ(lambda x: x**2, 0, 3)");
+        assert_eq!(
+            to_python("deriv(x^2, x)"),
+            "_deriv(lambda x: x**2, globals().get(\"x\", 0.0))"
+        );
+        assert_eq!(
+            to_python("integ(x^2, x, 0, 3)"),
+            "_integ(lambda x: x**2, 0, 3)"
+        );
     }
 
     #[test]
     fn test_plot_deriv_evaluates_over_range() {
-        assert_eq!(to_python_ctx("deriv(x^2, x)", Some("x")), "_deriv(lambda x: x**2, x)");
+        assert_eq!(
+            to_python_ctx("deriv(x^2, x)", Some("x")),
+            "_deriv(lambda x: x**2, x)"
+        );
         // deriv wrt a different variable still uses that variable's binding
-        assert_eq!(to_python_ctx("deriv(t^2, t)", Some("x")), "_deriv(lambda t: t**2, globals().get(\"t\", 0.0))");
+        assert_eq!(
+            to_python_ctx("deriv(t^2, t)", Some("x")),
+            "_deriv(lambda t: t**2, globals().get(\"t\", 0.0))"
+        );
     }
 }

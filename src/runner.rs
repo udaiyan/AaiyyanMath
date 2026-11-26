@@ -44,10 +44,15 @@ impl PythonRunner {
             let _ = fs::remove_dir_all(&prev.plot_dir);
         }
 
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("aaiyyanmath_run_{nanos}"));
 
-        if let Err(e) = fs::create_dir_all(&dir).and_then(|_| fs::write(dir.join("script.py"), generate_python(ws))) {
+        if let Err(e) = fs::create_dir_all(&dir)
+            .and_then(|_| fs::write(dir.join("script.py"), generate_python(ws)))
+        {
             self.last = Some(failed(dir, format!("Cannot write script: {e}")));
             return;
         }
@@ -99,7 +104,11 @@ fn failed(dir: PathBuf, msg: String) -> RunOutcome {
 }
 
 fn find_python() -> Option<&'static str> {
-    let candidates: &[&str] = if cfg!(windows) { &["python", "py"] } else { &["python3", "python"] };
+    let candidates: &[&str] = if cfg!(windows) {
+        &["python", "py"]
+    } else {
+        &["python3", "python"]
+    };
     for c in candidates {
         if let Ok(out) = Command::new(c)
             .arg("--version")
@@ -125,7 +134,8 @@ fn run_script(script: &Path, dir: &Path, cancel: &Arc<AtomicBool>) -> RunOutcome
         Some(p) => p,
         None => {
             outcome.problem = Some(
-                "Python not found. Install Python 3, then: pip install numpy pint matplotlib".into(),
+                "Python not found. Install Python 3, then: pip install numpy pint matplotlib"
+                    .into(),
             );
             outcome.duration = start.elapsed();
             return outcome;
@@ -133,10 +143,11 @@ fn run_script(script: &Path, dir: &Path, cancel: &Arc<AtomicBool>) -> RunOutcome
     };
 
     let mut child = match Command::new(python)
-        .arg("-u")            // unbuffered output
-        .arg("-X").arg("utf8") // avoid Windows cp1252 encoding errors on pint output
+        .arg("-u") // unbuffered output
+        .arg("-X")
+        .arg("utf8") // avoid Windows cp1252 encoding errors on pint output
         .arg(script)
-        .current_dir(dir)     // relative savefig paths land in the run dir
+        .current_dir(dir) // relative savefig paths land in the run dir
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -1,8 +1,8 @@
+use crate::quantity::{Quantity, QuantityOpsFactory};
 use eframe::egui;
 use exmex::{Express, FlatEx};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use crate::quantity::{Quantity, QuantityOpsFactory};
 
 #[derive(Serialize, Deserialize)]
 pub struct Expression {
@@ -40,13 +40,14 @@ impl Expression {
             }
         };
 
-        let expr: FlatEx<Quantity, QuantityOpsFactory> = match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
-            Ok(e) => e,
-            Err(e) => {
-                self.error = Some(format!("Parse error: {}", e));
-                return;
-            }
-        };
+        let expr: FlatEx<Quantity, QuantityOpsFactory> =
+            match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
+                Ok(e) => e,
+                Err(e) => {
+                    self.error = Some(format!("Parse error: {}", e));
+                    return;
+                }
+            };
 
         let mut local_bindings = bindings.clone();
         for (name, q) in crate::quantity::default_bindings() {
@@ -83,15 +84,21 @@ impl Expression {
 
         ui.horizontal(|ui| {
             ui.label("Name:");
-            if ui.add(egui::TextEdit::singleline(&mut self.label).desired_width(70.0)).changed() {
+            if ui
+                .add(egui::TextEdit::singleline(&mut self.label).desired_width(70.0))
+                .changed()
+            {
                 changed = true;
             }
             ui.label(":=");
-            if ui.add(
-                egui::TextEdit::singleline(&mut self.input)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("e.g. deriv(x^2, x) or integ(x^2, x, 0, 3)"),
-            ).changed() {
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.input)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("e.g. deriv(x^2, x) or integ(x^2, x, 0, 3)"),
+                )
+                .changed()
+            {
                 changed = true;
             }
         });
@@ -117,7 +124,10 @@ mod tests {
     use crate::quantity::{Dim, Quantity};
 
     fn h(pairs: &[(&str, Quantity)]) -> HashMap<String, Quantity> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     fn q(v: f64) -> Quantity {

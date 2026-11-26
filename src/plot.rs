@@ -1,9 +1,9 @@
+use crate::quantity::{Quantity, QuantityOpsFactory};
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot};
 use exmex::{Express, FlatEx};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use crate::quantity::{Quantity, QuantityOpsFactory};
 
 #[derive(Serialize, Deserialize)]
 pub struct PlotPane {
@@ -35,8 +35,8 @@ impl Default for PlotPane {
         Self {
             var: "x".to_owned(),
             expr: "sin(x)".to_owned(),
-            x_min: -6.28,
-            x_max: 6.28,
+            x_min: -std::f64::consts::TAU,
+            x_max: std::f64::consts::TAU,
             samples: 500,
             last_key: None,
             points: Vec::new(),
@@ -49,7 +49,11 @@ impl PlotPane {
     pub fn render(&mut self, ui: &mut egui::Ui, bindings: &HashMap<String, Quantity>) {
         ui.horizontal(|ui| {
             ui.label("y =");
-            ui.add(egui::TextEdit::singleline(&mut self.expr).desired_width(220.0).hint_text("e.g. deriv(x^2, x)"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.expr)
+                    .desired_width(220.0)
+                    .hint_text("e.g. deriv(x^2, x)"),
+            );
             ui.label("in");
             ui.add(egui::TextEdit::singleline(&mut self.var).desired_width(40.0));
         });
@@ -62,7 +66,10 @@ impl PlotPane {
             ui.add(egui::DragValue::new(&mut self.samples).range(10..=10_000));
         });
 
-        let mut bkeys: Vec<(String, Quantity)> = bindings.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut bkeys: Vec<(String, Quantity)> = bindings
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         bkeys.sort_by(|a, b| a.0.cmp(&b.0));
 
         let key = PlotKey {
@@ -134,18 +141,25 @@ impl PlotPane {
             // the fast path leaves this None and reuses `cached`.
             let sample_expr: Option<FlatEx<Quantity, QuantityOpsFactory>> = if has_calculus {
                 let mut sb = local_bindings.clone();
-                sb.insert(key.var.clone(), Quantity::new(x, crate::quantity::Dim::ZERO));
+                sb.insert(
+                    key.var.clone(),
+                    Quantity::new(x, crate::quantity::Dim::ZERO),
+                );
                 let processed = match crate::quantity::expand_calculus(&key.expr, &sb) {
                     Ok(p) => p,
                     Err(e) => {
-                        if first_err.is_none() { first_err = Some(e); }
+                        if first_err.is_none() {
+                            first_err = Some(e);
+                        }
                         continue;
                     }
                 };
                 match FlatEx::<Quantity, QuantityOpsFactory>::parse(&processed) {
                     Ok(e) => Some(e),
                     Err(e) => {
-                        if first_err.is_none() { first_err = Some(format!("Parse error: {}", e)); }
+                        if first_err.is_none() {
+                            first_err = Some(format!("Parse error: {}", e));
+                        }
                         continue;
                     }
                 }
@@ -213,7 +227,10 @@ mod tests {
             x_min,
             x_max,
             samples,
-            bindings: bindings.iter().map(|(k, v)| (k.to_string(), Quantity::new(*v, crate::quantity::Dim::ZERO))).collect(),
+            bindings: bindings
+                .iter()
+                .map(|(k, v)| (k.to_string(), Quantity::new(*v, crate::quantity::Dim::ZERO)))
+                .collect(),
         }
     }
 

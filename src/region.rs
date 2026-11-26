@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
 use crate::expression::Expression;
 use crate::plot::PlotPane;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub enum Region {

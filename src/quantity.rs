@@ -1,10 +1,10 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
-use std::collections::HashMap;
 
-use exmex::{BinOp, MakeOperators, Operator, Express, FlatEx};
-use serde::{Serialize, Deserialize};
+use exmex::{BinOp, Express, FlatEx, MakeOperators, Operator};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dim(pub [i8; 7]);
@@ -27,31 +27,47 @@ impl Dim {
 impl Add for Dim {
     type Output = Option<Dim>;
     fn add(self, rhs: Self) -> Self::Output {
-        if self == rhs { Some(self) } else { None }
+        if self == rhs {
+            Some(self)
+        } else {
+            None
+        }
     }
 }
 
 impl Sub for Dim {
     type Output = Option<Dim>;
     fn sub(self, rhs: Self) -> Self::Output {
-        if self == rhs { Some(self) } else { None }
+        if self == rhs {
+            Some(self)
+        } else {
+            None
+        }
     }
 }
 
 impl Mul for Dim {
     type Output = Dim;
+    // Exponent vectors ADD when quantities multiply (m·s → m^1·s^1) — intentional.
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn mul(self, rhs: Self) -> Self::Output {
         let mut out = [0; 7];
-        for i in 0..7 { out[i] = self.0[i] + rhs.0[i]; }
+        for i in 0..7 {
+            out[i] = self.0[i] + rhs.0[i];
+        }
         Dim(out)
     }
 }
 
 impl Div for Dim {
     type Output = Dim;
+    // Exponent vectors SUBTRACT when quantities divide (m/s → m^1·s^-1) — intentional.
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: Self) -> Self::Output {
         let mut out = [0; 7];
-        for i in 0..7 { out[i] = self.0[i] - rhs.0[i]; }
+        for i in 0..7 {
+            out[i] = self.0[i] - rhs.0[i];
+        }
         Dim(out)
     }
 }
@@ -62,11 +78,19 @@ impl fmt::Display for Dim {
         let mut parts = Vec::new();
         for i in 0..7 {
             if self.0[i] != 0 {
-                let suffix = if self.0[i] == 1 { "".to_string() } else { format!("^{}", self.0[i]) };
+                let suffix = if self.0[i] == 1 {
+                    "".to_string()
+                } else {
+                    format!("^{}", self.0[i])
+                };
                 parts.push(format!("{}{}", names[i], suffix));
             }
         }
-        if parts.is_empty() { write!(f, "") } else { write!(f, " {}", parts.join("·")) }
+        if parts.is_empty() {
+            write!(f, "")
+        } else {
+            write!(f, " {}", parts.join("·"))
+        }
     }
 }
 
@@ -79,17 +103,29 @@ pub struct Quantity {
 
 impl Quantity {
     pub fn new(value: f64, dim: Dim) -> Self {
-        Self { value, dim, error: None }
+        Self {
+            value,
+            dim,
+            error: None,
+        }
     }
 
     pub fn err(msg: impl Into<String>) -> Self {
-        Self { value: f64::NAN, dim: Dim::ZERO, error: Some(msg.into()) }
+        Self {
+            value: f64::NAN,
+            dim: Dim::ZERO,
+            error: Some(msg.into()),
+        }
     }
 }
 
 impl Default for Quantity {
     fn default() -> Self {
-        Self { value: 0.0, dim: Dim::ZERO, error: None }
+        Self {
+            value: 0.0,
+            dim: Dim::ZERO,
+            error: None,
+        }
     }
 }
 
@@ -106,11 +142,18 @@ impl fmt::Display for Quantity {
 impl Add for Quantity {
     type Output = Quantity;
     fn add(self, rhs: Self) -> Self::Output {
-        if let Some(e) = self.error { return Quantity::err(e); }
-        if let Some(e) = rhs.error { return Quantity::err(e); }
+        if let Some(e) = self.error {
+            return Quantity::err(e);
+        }
+        if let Some(e) = rhs.error {
+            return Quantity::err(e);
+        }
         match self.dim + rhs.dim {
             Some(d) => Quantity::new(self.value + rhs.value, d),
-            None => Quantity::err(format!("Dimension mismatch: cannot add '{}' and '{}'", self.dim, rhs.dim)),
+            None => Quantity::err(format!(
+                "Dimension mismatch: cannot add '{}' and '{}'",
+                self.dim, rhs.dim
+            )),
         }
     }
 }
@@ -118,11 +161,18 @@ impl Add for Quantity {
 impl Sub for Quantity {
     type Output = Quantity;
     fn sub(self, rhs: Self) -> Self::Output {
-        if let Some(e) = self.error { return Quantity::err(e); }
-        if let Some(e) = rhs.error { return Quantity::err(e); }
+        if let Some(e) = self.error {
+            return Quantity::err(e);
+        }
+        if let Some(e) = rhs.error {
+            return Quantity::err(e);
+        }
         match self.dim - rhs.dim {
             Some(d) => Quantity::new(self.value - rhs.value, d),
-            None => Quantity::err(format!("Dimension mismatch: cannot subtract '{}' and '{}'", self.dim, rhs.dim)),
+            None => Quantity::err(format!(
+                "Dimension mismatch: cannot subtract '{}' and '{}'",
+                self.dim, rhs.dim
+            )),
         }
     }
 }
@@ -130,8 +180,12 @@ impl Sub for Quantity {
 impl Mul for Quantity {
     type Output = Quantity;
     fn mul(self, rhs: Self) -> Self::Output {
-        if let Some(e) = self.error { return Quantity::err(e); }
-        if let Some(e) = rhs.error { return Quantity::err(e); }
+        if let Some(e) = self.error {
+            return Quantity::err(e);
+        }
+        if let Some(e) = rhs.error {
+            return Quantity::err(e);
+        }
         Quantity::new(self.value * rhs.value, self.dim * rhs.dim)
     }
 }
@@ -139,8 +193,12 @@ impl Mul for Quantity {
 impl Div for Quantity {
     type Output = Quantity;
     fn div(self, rhs: Self) -> Self::Output {
-        if let Some(e) = self.error { return Quantity::err(e); }
-        if let Some(e) = rhs.error { return Quantity::err(e); }
+        if let Some(e) = self.error {
+            return Quantity::err(e);
+        }
+        if let Some(e) = rhs.error {
+            return Quantity::err(e);
+        }
         Quantity::new(self.value / rhs.value, self.dim / rhs.dim)
     }
 }
@@ -155,12 +213,11 @@ impl FromStr for Quantity {
 
 pub fn preprocess(input: &str) -> String {
     let mut out = String::new();
-    let mut chars = input.chars().peekable();
     let mut prev: Option<char> = None;
     let mut prev_was_space = false;
     let mut prev_word = String::new();
 
-    while let Some(c) = chars.next() {
+    for c in input.chars() {
         if c.is_whitespace() {
             prev_was_space = true;
             continue;
@@ -178,7 +235,12 @@ pub fn preprocess(input: &str) -> String {
                         if p.is_ascii_digit() || p == ')' {
                             insert = true;
                         } else if p.is_alphabetic() {
-                            let is_func = ["sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "ln", "log", "exp", "sqrt", "abs", "min", "max", "floor", "ceil", "round"].contains(&prev_word.as_str());
+                            let is_func = [
+                                "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh",
+                                "tanh", "ln", "log", "exp", "sqrt", "abs", "min", "max", "floor",
+                                "ceil", "round",
+                            ]
+                            .contains(&prev_word.as_str());
                             if !is_func {
                                 insert = true;
                             }
@@ -187,12 +249,11 @@ pub fn preprocess(input: &str) -> String {
                         insert = true;
                     }
                 }
-            } else {
-                if (p.is_ascii_digit() || p == ')') && (c.is_alphabetic() || c == '(' || c == '_') {
-                    insert = true;
-                } else if p == ')' && c.is_ascii_digit() {
-                    insert = true;
-                }
+            } else if ((p.is_ascii_digit() || p == ')')
+                && (c.is_alphabetic() || c == '(' || c == '_'))
+                || (p == ')' && c.is_ascii_digit())
+            {
+                insert = true;
             }
 
             if insert {
@@ -243,10 +304,13 @@ pub fn find_func_call(s: &str, name: &str) -> Option<(usize, usize)> {
     let start = s.find(&format!("{}(", name))?;
     let mut depth = 0;
     for (i, c) in s[start..].char_indices() {
-        if c == '(' { depth += 1; }
-        else if c == ')' {
+        if c == '(' {
+            depth += 1;
+        } else if c == ')' {
             depth -= 1;
-            if depth == 0 { return Some((start, start + i)); }
+            if depth == 0 {
+                return Some((start, start + i));
+            }
         }
     }
     None
@@ -257,9 +321,11 @@ pub fn split_top_level(s: &str, delim: char) -> Vec<&str> {
     let mut depth = 0;
     let mut last = 0;
     for (i, c) in s.char_indices() {
-        if c == '(' { depth += 1; }
-        else if c == ')' { depth -= 1; }
-        else if c == delim && depth == 0 {
+        if c == '(' {
+            depth += 1;
+        } else if c == ')' {
+            depth -= 1;
+        } else if c == delim && depth == 0 {
             parts.push(&s[last..i]);
             last = i + 1;
         }
@@ -274,11 +340,8 @@ pub fn evaluate_single_expr(expr: &str, bindings: &HashMap<String, Quantity>) ->
     let var_names = parsed.var_names();
     let mut vars = Vec::new();
     for name in var_names {
-        if let Some(q) = bindings.get(name) {
-            vars.push(q.clone());
-        } else {
-            return None;
-        }
+        let q = bindings.get(name)?;
+        vars.push(q.clone());
     }
     parsed.eval(&vars).ok()
 }
@@ -293,7 +356,9 @@ pub fn numerical_derivative(
     let eval_at = |x: f64| -> f64 {
         let mut local_bindings = bindings.clone();
         local_bindings.insert(var.to_string(), Quantity::new(x, Dim::ZERO));
-        evaluate_single_expr(expr, &local_bindings).map(|q| q.value).unwrap_or(f64::NAN)
+        evaluate_single_expr(expr, &local_bindings)
+            .map(|q| q.value)
+            .unwrap_or(f64::NAN)
     };
 
     let f_plus = eval_at(at + h);
@@ -302,7 +367,9 @@ pub fn numerical_derivative(
 
     let mut local_bindings = bindings.clone();
     local_bindings.insert(var.to_string(), Quantity::new(1.0, Dim::ZERO));
-    let inner_dim = evaluate_single_expr(expr, &local_bindings).map(|q| q.dim).unwrap_or(Dim::ZERO);
+    let inner_dim = evaluate_single_expr(expr, &local_bindings)
+        .map(|q| q.dim)
+        .unwrap_or(Dim::ZERO);
 
     Quantity::new(deriv_value, inner_dim)
 }
@@ -319,7 +386,9 @@ pub fn numerical_integral(
     let eval_at = |x: f64| -> f64 {
         let mut local_bindings = bindings.clone();
         local_bindings.insert(var.to_string(), Quantity::new(x, Dim::ZERO));
-        evaluate_single_expr(expr, &local_bindings).map(|q| q.value).unwrap_or(f64::NAN)
+        evaluate_single_expr(expr, &local_bindings)
+            .map(|q| q.value)
+            .unwrap_or(f64::NAN)
     };
 
     let mut sum = eval_at(a) + eval_at(b);
@@ -336,7 +405,9 @@ pub fn numerical_integral(
 
     let mut local_bindings = bindings.clone();
     local_bindings.insert(var.to_string(), Quantity::new(1.0, Dim::ZERO));
-    let inner_dim = evaluate_single_expr(expr, &local_bindings).map(|q| q.dim).unwrap_or(Dim::ZERO);
+    let inner_dim = evaluate_single_expr(expr, &local_bindings)
+        .map(|q| q.dim)
+        .unwrap_or(Dim::ZERO);
 
     Quantity::new(integral_value, inner_dim)
 }
@@ -344,10 +415,17 @@ pub fn numerical_integral(
 fn format_f64(val: f64) -> String {
     let s = format!("{:.10}", val);
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-0" { "0".to_string() } else { s.to_string() }
+    if s.is_empty() || s == "-0" {
+        "0".to_string()
+    } else {
+        s.to_string()
+    }
 }
 
-pub fn expand_calculus(input: &str, bindings: &HashMap<String, Quantity>) -> Result<String, String> {
+pub fn expand_calculus(
+    input: &str,
+    bindings: &HashMap<String, Quantity>,
+) -> Result<String, String> {
     let mut processed = preprocess(input);
 
     loop {
@@ -372,8 +450,12 @@ pub fn expand_calculus(input: &str, bindings: &HashMap<String, Quantity>) -> Res
             if parts.len() == 4 {
                 let expr_str = parts[0].trim();
                 let var = parts[1].trim();
-                let a = evaluate_single_expr(parts[2].trim(), bindings).map(|q| q.value).ok_or_else(|| "Invalid integral lower bound".to_string())?;
-                let b = evaluate_single_expr(parts[3].trim(), bindings).map(|q| q.value).ok_or_else(|| "Invalid integral upper bound".to_string())?;
+                let a = evaluate_single_expr(parts[2].trim(), bindings)
+                    .map(|q| q.value)
+                    .ok_or_else(|| "Invalid integral lower bound".to_string())?;
+                let b = evaluate_single_expr(parts[3].trim(), bindings)
+                    .map(|q| q.value)
+                    .ok_or_else(|| "Invalid integral upper bound".to_string())?;
                 let val = numerical_integral(expr_str, var, a, b, bindings);
                 processed.replace_range(start..=end, &format!("({})", format_f64(val.value)));
                 changed = true;
@@ -398,49 +480,143 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
         vec![
             Operator::make_bin_unary(
                 "+",
-                BinOp { apply: |a, b| a + b, prio: 0, is_commutative: true },
+                BinOp {
+                    apply: |a, b| a + b,
+                    prio: 0,
+                    is_commutative: true,
+                },
                 |a| a,
             ),
             Operator::make_bin_unary(
                 "-",
-                BinOp { apply: |a, b| a - b, prio: 0, is_commutative: false },
+                BinOp {
+                    apply: |a, b| a - b,
+                    prio: 0,
+                    is_commutative: false,
+                },
                 |a| Quantity::new(-a.value, a.dim),
             ),
             Operator::make_bin(
                 "*",
-                BinOp { apply: |a, b| a * b, prio: 1, is_commutative: true },
+                BinOp {
+                    apply: |a, b| a * b,
+                    prio: 1,
+                    is_commutative: true,
+                },
             ),
             Operator::make_bin(
                 "/",
-                BinOp { apply: |a, b| a / b, prio: 1, is_commutative: false },
+                BinOp {
+                    apply: |a, b| a / b,
+                    prio: 1,
+                    is_commutative: false,
+                },
             ),
             Operator::make_bin(
                 "^",
                 BinOp {
                     apply: |a, b| {
-                        if !b.dim.is_zero() { return Quantity::err("Exponent must be dimensionless"); }
-                        if b.value.fract() != 0.0 { return Quantity::err("Exponent must be an integer"); }
+                        if !b.dim.is_zero() {
+                            return Quantity::err("Exponent must be dimensionless");
+                        }
+                        if b.value.fract() != 0.0 {
+                            return Quantity::err("Exponent must be an integer");
+                        }
                         let exp = b.value as i8;
                         let mut new_dim = a.dim;
-                        for i in 0..7 { new_dim.0[i] *= exp; }
+                        for d in new_dim.0.iter_mut() {
+                            *d *= exp;
+                        }
                         Quantity::new(a.value.powf(b.value), new_dim)
                     },
                     prio: 2,
                     is_commutative: false,
                 },
             ),
-            Operator::make_unary("sin", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.sin(), Dim::ZERO) } }),
-            Operator::make_unary("cos", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.cos(), Dim::ZERO) } }),
-            Operator::make_unary("tan", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.tan(), Dim::ZERO) } }),
-            Operator::make_unary("asin", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.asin(), Dim::ZERO) } }),
-            Operator::make_unary("acos", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.acos(), Dim::ZERO) } }),
-            Operator::make_unary("atan", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.atan(), Dim::ZERO) } }),
-            Operator::make_unary("sinh", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.sinh(), Dim::ZERO) } }),
-            Operator::make_unary("cosh", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.cosh(), Dim::ZERO) } }),
-            Operator::make_unary("tanh", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.tanh(), Dim::ZERO) } }),
-            Operator::make_unary("ln", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.ln(), Dim::ZERO) } }),
-            Operator::make_unary("log", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.log10(), Dim::ZERO) } }),
-            Operator::make_unary("exp", |a| { if !a.dim.is_zero() { Quantity::err("Argument must be dimensionless") } else { Quantity::new(a.value.exp(), Dim::ZERO) } }),
+            Operator::make_unary("sin", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.sin(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("cos", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.cos(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("tan", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.tan(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("asin", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.asin(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("acos", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.acos(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("atan", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.atan(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("sinh", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.sinh(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("cosh", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.cosh(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("tanh", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.tanh(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("ln", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.ln(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("log", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.log10(), Dim::ZERO)
+                }
+            }),
+            Operator::make_unary("exp", |a| {
+                if !a.dim.is_zero() {
+                    Quantity::err("Argument must be dimensionless")
+                } else {
+                    Quantity::new(a.value.exp(), Dim::ZERO)
+                }
+            }),
             Operator::make_unary("abs", |a| Quantity::new(a.value.abs(), a.dim)),
             Operator::make_unary("floor", |a| Quantity::new(a.value.floor(), a.dim)),
             Operator::make_unary("ceil", |a| Quantity::new(a.value.ceil(), a.dim)),
@@ -448,7 +624,9 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
             Operator::make_unary("sqrt", |a| {
                 let mut new_dim = a.dim;
                 for i in 0..7 {
-                    if a.dim.0[i] % 2 != 0 { return Quantity::err("Cannot take sqrt of a dimension with odd exponent"); }
+                    if a.dim.0[i] % 2 != 0 {
+                        return Quantity::err("Cannot take sqrt of a dimension with odd exponent");
+                    }
                     new_dim.0[i] /= 2;
                 }
                 Quantity::new(a.value.sqrt(), new_dim)
@@ -457,8 +635,12 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
                 "min",
                 BinOp {
                     apply: |a, b| {
-                        if let Some(e) = a.error { return Quantity::err(e); }
-                        if let Some(e) = b.error { return Quantity::err(e); }
+                        if let Some(e) = a.error {
+                            return Quantity::err(e);
+                        }
+                        if let Some(e) = b.error {
+                            return Quantity::err(e);
+                        }
                         if a.dim == b.dim {
                             Quantity::new(a.value.min(b.value), a.dim)
                         } else {
@@ -473,8 +655,12 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
                 "max",
                 BinOp {
                     apply: |a, b| {
-                        if let Some(e) = a.error { return Quantity::err(e); }
-                        if let Some(e) = b.error { return Quantity::err(e); }
+                        if let Some(e) = a.error {
+                            return Quantity::err(e);
+                        }
+                        if let Some(e) = b.error {
+                            return Quantity::err(e);
+                        }
                         if a.dim == b.dim {
                             Quantity::new(a.value.max(b.value), a.dim)
                         } else {

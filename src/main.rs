@@ -4,8 +4,8 @@ mod plot;
 mod python;
 mod quantity;
 mod region;
-mod worksheet;
 mod runner;
+mod worksheet;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

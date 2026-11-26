@@ -1,9 +1,9 @@
-use eframe::egui;
-use serde::{Serialize, Deserialize};
-use std::fs;
-use crate::worksheet::Worksheet;
 use crate::python::generate_python;
 use crate::runner::PythonRunner;
+use crate::worksheet::Worksheet;
+use eframe::egui;
+use serde::{Deserialize, Serialize};
+use std::fs;
 
 const SAVE_FILE: &str = "aaiyyanmath_doc.json";
 
@@ -48,8 +48,11 @@ impl MathcadApp {
             Some(last) => last.plot_dir.clone(),
             None => return,
         };
-        let Ok(entries) = fs::read_dir(&dir) else { return };
-        let mut paths: Vec<_> = entries.flatten()
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return;
+        };
+        let mut paths: Vec<_> = entries
+            .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().map(|e| e == "png").unwrap_or(false))
             .collect();
@@ -83,22 +86,20 @@ impl MathcadApp {
 
     fn load_from_file(&mut self) {
         match fs::read_to_string(SAVE_FILE) {
-            Ok(json) => {
-                match serde_json::from_str::<MathcadApp>(&json) {
-                    Ok(mut loaded) => {
-                        for ws in &mut loaded.worksheets {
-                            ws.evaluate_all();
-                        }
-                        self.worksheets = loaded.worksheets;
-                        self.active_idx = loaded.active_idx;
-                        if self.active_idx >= self.worksheets.len() {
-                            self.active_idx = 0;
-                        }
-                        self.status_message = Some(format!("✅ Loaded from {}", SAVE_FILE));
+            Ok(json) => match serde_json::from_str::<MathcadApp>(&json) {
+                Ok(mut loaded) => {
+                    for ws in &mut loaded.worksheets {
+                        ws.evaluate_all();
                     }
-                    Err(e) => self.status_message = Some(format!("❌ Parse failed: {}", e)),
+                    self.worksheets = loaded.worksheets;
+                    self.active_idx = loaded.active_idx;
+                    if self.active_idx >= self.worksheets.len() {
+                        self.active_idx = 0;
+                    }
+                    self.status_message = Some(format!("✅ Loaded from {}", SAVE_FILE));
                 }
-            }
+                Err(e) => self.status_message = Some(format!("❌ Parse failed: {}", e)),
+            },
             Err(e) => self.status_message = Some(format!("❌ Read failed: {}", e)),
         }
     }
@@ -141,11 +142,19 @@ impl eframe::App for MathcadApp {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut name)
                             .desired_width(ui.available_width() - 10.0)
-                            .text_color(if self.active_idx == i { egui::Color32::LIGHT_BLUE } else { ui.style().visuals.text_color() })
+                            .text_color(if self.active_idx == i {
+                                egui::Color32::LIGHT_BLUE
+                            } else {
+                                ui.style().visuals.text_color()
+                            }),
                     );
 
-                    if response.changed() { ws.name = name; }
-                    if response.clicked() { clicked_idx = Some(i); }
+                    if response.changed() {
+                        ws.name = name;
+                    }
+                    if response.clicked() {
+                        clicked_idx = Some(i);
+                    }
                     ui.add_space(2.0);
                 }
 
@@ -167,7 +176,10 @@ impl eframe::App for MathcadApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Python");
-                    if ui.add_enabled(!self.runner.running, egui::Button::new("▶ Run")).clicked() {
+                    if ui
+                        .add_enabled(!self.runner.running, egui::Button::new("▶ Run"))
+                        .clicked()
+                    {
                         if let Some(ws) = self.worksheets.get(self.active_idx) {
                             self.runner.start(ws);
                         }
@@ -182,13 +194,19 @@ impl eframe::App for MathcadApp {
 
                 if let Some(last) = &self.runner.last {
                     if last.success {
-                        ui.colored_label(egui::Color32::from_rgb(120, 200, 120),
-                                         format!("✅ exit 0 · {:.2?}", last.duration));
+                        ui.colored_label(
+                            egui::Color32::from_rgb(120, 200, 120),
+                            format!("✅ exit 0 · {:.2?}", last.duration),
+                        );
                     } else {
-                        let why = last.problem.clone()
+                        let why = last
+                            .problem
+                            .clone()
                             .unwrap_or_else(|| format!("exit {:?}", last.exit_code));
-                        ui.colored_label(egui::Color32::from_rgb(230, 120, 120),
-                                         format!("❌ {} · {:.2?}", why, last.duration));
+                        ui.colored_label(
+                            egui::Color32::from_rgb(230, 120, 120),
+                            format!("❌ {} · {:.2?}", why, last.duration),
+                        );
                     }
                 }
                 ui.separator();
@@ -204,34 +222,45 @@ impl eframe::App for MathcadApp {
                                 egui::TextEdit::multiline(&mut code_view)
                                     .code_editor()
                                     .desired_width(f32::INFINITY)
-                                    .interactive(false)
+                                    .interactive(false),
                             );
                         });
                 }
 
                 ui.separator();
                 ui.strong("Output");
-                egui::ScrollArea::vertical().id_salt("py_output").show(ui, |ui| {
-                    if let Some(last) = &self.runner.last {
-                        if !last.stdout.is_empty() {
-                            ui.monospace(last.stdout.as_str());
+                egui::ScrollArea::vertical()
+                    .id_salt("py_output")
+                    .show(ui, |ui| {
+                        if let Some(last) = &self.runner.last {
+                            if !last.stdout.is_empty() {
+                                ui.monospace(last.stdout.as_str());
+                            }
+                            if !last.stderr.is_empty() {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(230, 120, 120),
+                                    last.stderr.as_str(),
+                                );
+                            }
+                            for tex in &self.plot_textures {
+                                ui.add(
+                                    egui::Image::new(egui::load::SizedTexture::new(
+                                        tex.id(),
+                                        tex.size_vec2(),
+                                    ))
+                                    .max_width(ui.available_width()),
+                                );
+                            }
+                            if last.stdout.is_empty()
+                                && last.stderr.is_empty()
+                                && self.plot_textures.is_empty()
+                            {
+                                ui.weak("(no output)");
+                            }
+                        } else {
+                            ui.weak("Press ▶ Run to execute this script with your local Python.");
                         }
-                        if !last.stderr.is_empty() {
-                            ui.colored_label(egui::Color32::from_rgb(230, 120, 120), last.stderr.as_str());
-                        }
-                        for tex in &self.plot_textures {
-                            ui.add(
-                                egui::Image::new(egui::load::SizedTexture::new(tex.id(), tex.size_vec2()))
-                                    .max_width(ui.available_width())
-                            );
-                        }
-                        if last.stdout.is_empty() && last.stderr.is_empty() && self.plot_textures.is_empty() {
-                            ui.weak("(no output)");
-                        }
-                    } else {
-                        ui.weak("Press ▶ Run to execute this script with your local Python.");
-                    }
-                });
+                    });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -247,8 +276,8 @@ impl eframe::App for MathcadApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::region::Region;
     use crate::expression::Expression;
+    use crate::region::Region;
 
     fn make_test_app() -> MathcadApp {
         let mut ws2 = Worksheet::new("Test WS");
@@ -271,8 +300,14 @@ mod tests {
         let app = make_test_app();
         let json = serde_json::to_string(&app).unwrap();
 
-        assert!(!json.contains("bindings"), "Bindings should not be saved to disk!");
-        assert!(!json.contains("last_key"), "Plot cache should not be saved!");
+        assert!(
+            !json.contains("bindings"),
+            "Bindings should not be saved to disk!"
+        );
+        assert!(
+            !json.contains("last_key"),
+            "Plot cache should not be saved!"
+        );
 
         let mut loaded: MathcadApp = serde_json::from_str(&json).unwrap();
         loaded.worksheets[1].evaluate_all();
@@ -281,7 +316,10 @@ mod tests {
         assert_eq!(loaded.active_idx, 1);
         assert_eq!(loaded.worksheets[1].name, "Test WS");
 
-        let x_binding = loaded.worksheets[1].bindings.get("x").expect("Math failed to re-evaluate on load");
+        let x_binding = loaded.worksheets[1]
+            .bindings
+            .get("x")
+            .expect("Math failed to re-evaluate on load");
         assert_eq!(x_binding.value, 999.0);
         assert_eq!(x_binding.dim, crate::quantity::Dim::LENGTH);
     }

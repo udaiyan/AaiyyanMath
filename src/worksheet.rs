@@ -1,10 +1,10 @@
-use eframe::egui;
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 use crate::expression::Expression;
 use crate::plot::PlotPane;
 use crate::quantity::Quantity;
 use crate::region::Region;
+use eframe::egui;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct Worksheet {
@@ -19,7 +19,10 @@ impl Worksheet {
         let mut ws = Self {
             name: name.to_string(),
             regions: vec![
-                Region::Text("Welcome to AaiyyanMath.\nThis is a Text Region. You can write notes here.".to_string()),
+                Region::Text(
+                    "Welcome to AaiyyanMath.\nThis is a Text Region. You can write notes here."
+                        .to_string(),
+                ),
                 Region::Math(Expression::new("a", "2 + 3 * 4")),
                 Region::Math(Expression::new("b", "a * 2 m")),
                 Region::Plot(PlotPane::default()),
@@ -60,9 +63,15 @@ impl Worksheet {
         for i in 0..len {
             ui.horizontal(|ui| {
                 ui.strong(format!("Region {}", i + 1));
-                if ui.button("⬆").clicked() && i > 0 { move_up_idx = Some(i); }
-                if ui.button("⬇").clicked() && i < len - 1 { move_down_idx = Some(i); }
-                if ui.button("❌ Remove").clicked() { remove_idx = Some(i); }
+                if ui.button("⬆").clicked() && i > 0 {
+                    move_up_idx = Some(i);
+                }
+                if ui.button("⬇").clicked() && i < len - 1 {
+                    move_down_idx = Some(i);
+                }
+                if ui.button("❌ Remove").clicked() {
+                    remove_idx = Some(i);
+                }
             });
 
             match &mut self.regions[i] {
@@ -70,7 +79,7 @@ impl Worksheet {
                     ui.add(
                         egui::TextEdit::multiline(txt)
                             .desired_width(f32::INFINITY)
-                            .hint_text("Type your notes here...")
+                            .hint_text("Type your notes here..."),
                     );
                 }
                 Region::Math(expr) => {
@@ -103,7 +112,8 @@ impl Worksheet {
         ui.horizontal(|ui| {
             if ui.button("➕ Add Math").clicked() {
                 let new_label = format!("v{}", len + 1);
-                self.regions.push(Region::Math(Expression::new(&new_label, "")));
+                self.regions
+                    .push(Region::Math(Expression::new(&new_label, "")));
                 any_changed = true;
             }
             if ui.button("➕ Add Text").clicked() {
