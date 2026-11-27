@@ -261,7 +261,8 @@ mod tests {
     #[test]
     fn test_to_python_units() {
         assert_eq!(to_python("5 m"), "5*m");
-        assert_eq!(to_python("5 m / 2 s"), "5*m/2*s");
+        // Mathcad precedence: the juxtaposed denominator is grouped.
+        assert_eq!(to_python("5 m / 2 s"), "5*m/(2*s)");
         assert_eq!(to_python("10 kg * 2"), "10*kg*2");
     }
 
@@ -276,6 +277,20 @@ mod tests {
     }
 
     #[test]
+    fn test_to_python_mathcad_precedence() {
+        // Mirrors quantity::preprocess — both engines share it, so the
+        // generated Python evaluates identically to the Rust engine.
+        assert_eq!(to_python("5 m / 2 s"), "5*m/(2*s)");
+        assert_eq!(to_python("1 / 2 x"), "1/(2*x)");
+        assert_eq!(to_python("2 x / 3 y"), "2*x/(3*y)");
+        assert_eq!(to_python("6 kg m / 2 s^2"), "6*kg*m/(2*s**2)");
+        assert_eq!(to_python("2 x^2"), "2*x**2");
+        assert_eq!(to_python("kg m / s^2"), "kg*m/s**2");
+        // Explicit operators keep ordinary left-to-right precedence.
+        assert_eq!(to_python("5 * m / 2 * s"), "5*m/2*s");
+    }
+
+    #[test]
     fn test_generate_python_headers_and_bindings() {
         let ws = make_math_ws("a", "5 m");
         let code = generate_python(&ws);
@@ -283,6 +298,14 @@ mod tests {
         assert!(code.contains("import pint"));
         assert!(code.contains("a = 5*m"));
         assert!(code.contains("print('a =', a)"));
+    }
+
+    #[test]
+    fn test_generate_python_mathcad_region() {
+        let ws = make_math_ws("v", "5 m / 2 s");
+        let code = generate_python(&ws);
+        assert!(code.contains("v = 5*m/(2*s)"));
+        assert!(code.contains("print('v =', v)"));
     }
 
     #[test]

@@ -211,70 +211,210 @@ impl FromStr for Quantity {
     }
 }
 
-pub fn preprocess(input: &str) -> String {
-    let mut out = String::new();
-    let mut prev: Option<char> = None;
-    let mut prev_was_space = false;
-    let mut prev_word = String::new();
+/// Functions whose name followed by `(` is application, not juxtaposition.
+/// `deriv`/`integ` are expanded later by `expand_calculus`.
+const FUNCTIONS: &[&str] = &[
+    "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "ln", "log", "exp",
+    "sqrt", "abs", "min", "max", "floor", "ceil", "round", "deriv", "integ",
+];
 
-    for c in input.chars() {
+#[derive(Clone)]
+enum Tok {
+    Num(String),
+    Ident(String),
+    Op(char),
+    LParen,
+    RParen,
+    Comma,
+    Other(char),
+}
+
+fn tokenize(input: &str) -> Vec<Tok> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut toks = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
         if c.is_whitespace() {
-            prev_was_space = true;
+            i += 1;
             continue;
         }
+        if c.is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i < chars.len() && chars[i] == '.' {
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            toks.push(Tok::Num(chars[start..i].iter().collect()));
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            toks.push(Tok::Ident(chars[start..i].iter().collect()));
+            continue;
+        }
+        match c {
+            '+' | '-' | '*' | '/' | '^' => toks.push(Tok::Op(c)),
+            '(' => toks.push(Tok::LParen),
+            ')' => toks.push(Tok::RParen),
+            ',' => toks.push(Tok::Comma),
+            _ => toks.push(Tok::Other(c)),
+        }
+        i += 1;
+    }
+    toks
+}
 
-        if let Some(p) = prev {
-            let p_is_alnum = p.is_ascii_digit() || p.is_alphabetic() || p == '_' || p == ')';
-            let c_is_alnum = c.is_ascii_digit() || c.is_alphabetic() || c == '_' || c == '(';
+struct Rewriter {
+    toks: Vec<Tok>,
+    pos: usize,
+}
 
-            let mut insert = false;
+impl Rewriter {
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos)
+    }
 
-            if prev_was_space {
-                if p_is_alnum && c_is_alnum {
-                    if c == '(' {
-                        if p.is_ascii_digit() || p == ')' {
-                            insert = true;
-                        } else if p.is_alphabetic() {
-                            let is_func = [
-                                "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh",
-                                "tanh", "ln", "log", "exp", "sqrt", "abs", "min", "max", "floor",
-                                "ceil", "round",
-                            ]
-                            .contains(&prev_word.as_str());
-                            if !is_func {
-                                insert = true;
-                            }
-                        }
-                    } else {
-                        insert = true;
+    /// A juxtaposed product continues with a number, identifier or `(` —
+    /// never across an explicit operator (so `2 -3` stays subtraction).
+    fn chain_continues(&self) -> bool {
+        matches!(
+            self.peek(),
+            Some(Tok::Num(_)) | Some(Tok::Ident(_)) | Some(Tok::LParen)
+        )
+    }
+
+    /// A unit is an atom (number, identifier, function call, parenthesized
+    /// sequence) with an optional `^` suffix — powers bind tighter than
+    /// juxtaposition, so `2 x^2` is `2*(x^2)`, never `(2*x)^2`.
+    fn unit(&mut self) -> String {
+        let mut out = String::new();
+        if let Some(Tok::Op(c)) = self.peek() {
+            if *c == '+' || *c == '-' {
+                let sign = *c;
+                self.pos += 1;
+                out.push(sign);
+                out.push_str(&self.unit());
+                return out;
+            }
+        }
+        match self.peek().cloned() {
+            Some(Tok::Num(s)) => {
+                self.pos += 1;
+                out.push_str(&s);
+            }
+            Some(Tok::Ident(name)) => {
+                self.pos += 1;
+                out.push_str(&name);
+                if FUNCTIONS.contains(&name.as_str()) && matches!(self.peek(), Some(Tok::LParen)) {
+                    self.pos += 1;
+                    out.push('(');
+                    out.push_str(&self.seq());
+                    if matches!(self.peek(), Some(Tok::RParen)) {
+                        self.pos += 1;
+                        out.push(')');
                     }
                 }
-            } else if ((p.is_ascii_digit() || p == ')')
-                && (c.is_alphabetic() || c == '(' || c == '_'))
-                || (p == ')' && c.is_ascii_digit())
-            {
-                insert = true;
             }
-
-            if insert {
-                out.push('*');
+            Some(Tok::LParen) => {
+                self.pos += 1;
+                out.push('(');
+                out.push_str(&self.seq());
+                if matches!(self.peek(), Some(Tok::RParen)) {
+                    self.pos += 1;
+                    out.push(')');
+                }
             }
+            _ => return out,
         }
-
-        out.push(c);
-        prev = Some(c);
-
-        if prev_was_space {
-            prev_word.clear();
+        if matches!(self.peek(), Some(Tok::Op('^'))) {
+            self.pos += 1;
+            out.push('^');
+            out.push_str(&self.unit());
         }
+        out
+    }
 
-        if c.is_alphabetic() {
-            prev_word.push(c);
+    /// A maximal juxtaposition chain. It is parenthesized only when it is the
+    /// right operand of `/` (Mathcad: `5 m / 2 s` = `5*m/(2*s)`); anywhere
+    /// else plain `*` insertion is value-equivalent and keeps output minimal.
+    fn chain(&mut self, wrap: bool) -> String {
+        let first = self.unit();
+        if !self.chain_continues() {
+            return first;
+        }
+        let mut parts = vec![first];
+        while self.chain_continues() {
+            parts.push(self.unit());
+        }
+        let joined = parts.join("*");
+        if wrap {
+            format!("({joined})")
         } else {
-            prev_word.clear();
+            joined
         }
+    }
 
-        prev_was_space = false;
+    /// Chains separated by explicit operators / commas, within one paren scope.
+    fn seq(&mut self) -> String {
+        let mut out = self.chain(false);
+        loop {
+            match self.peek() {
+                Some(Tok::Op(c)) if *c != '^' => {
+                    let is_div = *c == '/';
+                    out.push(*c);
+                    self.pos += 1;
+                    out.push_str(&self.chain(is_div));
+                }
+                Some(Tok::Comma) => {
+                    out.push(',');
+                    self.pos += 1;
+                    out.push_str(&self.chain(false));
+                }
+                Some(Tok::Other(c)) => {
+                    out.push(*c);
+                    self.pos += 1;
+                    out.push_str(&self.chain(false));
+                }
+                _ => break,
+            }
+        }
+        out
+    }
+}
+
+/// Normalize an expression for exmex: strip whitespace and make implicit
+/// multiplication explicit with **Mathcad precedence** — juxtaposition binds
+/// tighter than `*` and `/` (but looser than `^`).
+///
+/// `5 m / 2 s` becomes `5*m/(2*s)` (= 2.5 m/s), not `5*m/2*s` (= 2.5 m·s).
+/// `ms` stays one identifier (milliseconds); `m s` is m·s. Malformed input is
+/// passed through for exmex to reject. Idempotent: the output contains no
+/// juxtaposition, so re-processing it changes nothing.
+pub fn preprocess(input: &str) -> String {
+    let mut rw = Rewriter {
+        toks: tokenize(input),
+        pos: 0,
+    };
+    let mut out = rw.seq();
+    // Pass through anything the rewriter could not place (malformed input —
+    // exmex produces the parse error, not us).
+    for tok in &rw.toks[rw.pos..] {
+        match tok {
+            Tok::Num(s) | Tok::Ident(s) => out.push_str(s),
+            Tok::Op(c) | Tok::Other(c) => out.push(*c),
+            Tok::LParen => out.push('('),
+            Tok::RParen => out.push(')'),
+            Tok::Comma => out.push(','),
+        }
     }
     out
 }
@@ -679,10 +819,21 @@ impl MakeOperators<Quantity> for QuantityOpsFactory {
 mod tests {
     use super::*;
 
+    fn q(v: f64) -> Quantity {
+        Quantity::new(v, Dim::ZERO)
+    }
+
     fn eval_str(s: &str) -> Quantity {
+        eval_with(s, &[])
+    }
+
+    fn eval_with(s: &str, extra: &[(&str, Quantity)]) -> Quantity {
         let mut binds = HashMap::new();
         for (k, v) in default_bindings() {
             binds.insert(k.to_string(), v);
+        }
+        for (k, v) in extra {
+            binds.insert((*k).to_string(), v.clone());
         }
         let processed = expand_calculus(s, &binds).unwrap();
         let expr: FlatEx<Quantity, QuantityOpsFactory> = FlatEx::parse(&processed).unwrap();
@@ -719,6 +870,186 @@ mod tests {
         assert_eq!(preprocess("sin (x)"), "sin(x)");
         assert_eq!(preprocess("2 sin(x)"), "2*sin(x)");
         assert_eq!(preprocess("min(a, b)"), "min(a,b)");
+    }
+
+    #[test]
+    fn preprocess_mathcad_juxtaposition() {
+        // Juxtaposition binds tighter than '/' — denominators get grouped.
+        assert_eq!(preprocess("5 m / 2 s"), "5*m/(2*s)");
+        assert_eq!(preprocess("1 / 2 x"), "1/(2*x)");
+        assert_eq!(preprocess("2 x / 3 y"), "2*x/(3*y)");
+        assert_eq!(preprocess("6 kg m / 2 s^2"), "6*kg*m/(2*s^2)");
+        assert_eq!(preprocess("2 (a+b) / 3 c"), "2*(a+b)/(3*c)");
+        assert_eq!(preprocess("a / b c / d e"), "a/(b*c)/(d*e)");
+        // Powers bind tighter than juxtaposition.
+        assert_eq!(preprocess("2 m^2"), "2*m^2");
+        assert_eq!(preprocess("x^2 y"), "x^2*y");
+        assert_eq!(preprocess("2^3 m"), "2^3*m");
+        // Everything else keeps the minimal, left-to-right form.
+        assert_eq!(preprocess("kg m / s^2"), "kg*m/s^2");
+        assert_eq!(preprocess("5 * m / 2 * s"), "5*m/2*s");
+        assert_eq!(preprocess("a b c"), "a*b*c");
+        assert_eq!(preprocess("(a+b)(c+d)"), "(a+b)*(c+d)");
+        assert_eq!(preprocess("sin(x) cos(x)"), "sin(x)*cos(x)");
+        assert_eq!(preprocess("-2 m"), "-2*m");
+        assert_eq!(preprocess("5 m / (2 s)"), "5*m/(2*s)");
+    }
+
+    #[test]
+    fn preprocess_idempotent() {
+        for s in [
+            "5 m / 2 s",
+            "1 / 2 x",
+            "2 x / 3 y",
+            "6 kg m / 2 s^2",
+            "2 m^2",
+            "min(2 m, 3 m)",
+            "deriv(x^2, x)",
+            "5*m/(2*s)",
+            "(a+b)(c+d)",
+            "2 sin(x)",
+        ] {
+            let once = preprocess(s);
+            assert_eq!(preprocess(&once), once, "not idempotent for {s:?}");
+        }
+    }
+
+    #[test]
+    fn preprocess_malformed_passthrough() {
+        // preprocess never panics; exmex produces the parse error downstream.
+        assert_eq!(preprocess("2 +"), "2+");
+        assert_eq!(preprocess("(a"), "(a");
+        assert_eq!(preprocess("a)"), "a)");
+        assert_eq!(preprocess(""), "");
+        assert_eq!(preprocess("()"), "()");
+    }
+
+    #[test]
+    fn preprocess_function_and_variable_spacing() {
+        // deriv/integ tolerate a space before '(' (previously broken).
+        assert_eq!(preprocess("deriv (x^2, x)"), "deriv(x^2,x)");
+        assert_eq!(preprocess("integ (x^2, x, 0, 3)"), "integ(x^2,x,0,3)");
+        // Non-function identifier + parens is implicit multiplication,
+        // with or without a space (previously inconsistent).
+        assert_eq!(preprocess("x(y)"), "x*(y)");
+        assert_eq!(preprocess("x (y)"), "x*(y)");
+    }
+
+    #[test]
+    fn preprocess_scientific_notation_is_not_special() {
+        // Existing behavior preserved: `e` is Euler's constant, so `1e-5`
+        // means 1*e - 5. Scientific-notation literals are a later step.
+        assert_eq!(preprocess("1e-5"), "1*e-5");
+    }
+
+    #[test]
+    fn eval_mathcad_velocity() {
+        let v = eval_str("5 m / 2 s");
+        assert_eq!(v.value, 2.5);
+        assert_eq!(v.dim, Dim::LENGTH / Dim::TIME);
+        // Parenthesized denominators give the same answer as before.
+        let p = eval_str("5 m / (2 s)");
+        assert_eq!(p.value, 2.5);
+        assert_eq!(p.dim, Dim::LENGTH / Dim::TIME);
+    }
+
+    #[test]
+    fn eval_one_over_juxtaposition() {
+        let r = eval_str("1 / 2 m");
+        assert_eq!(r.value, 0.5);
+        assert_eq!(r.dim, Dim([0, -1, 0, 0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn eval_chained_division() {
+        let r = eval_str("10 m / 2 s / 5");
+        assert_eq!(r.value, 1.0);
+        assert_eq!(r.dim, Dim::LENGTH / Dim::TIME);
+        let n = eval_str("100 / 10 / 2");
+        assert_eq!(n.value, 5.0);
+        assert!(n.dim.is_zero());
+    }
+
+    #[test]
+    fn eval_powers_bind_tighter_than_juxtaposition() {
+        let a = eval_str("2 m^2");
+        assert_eq!(a.value, 2.0);
+        assert_eq!(a.dim, Dim::LENGTH * Dim::LENGTH);
+
+        let b = eval_str("m^2 s");
+        assert_eq!(b.value, 1.0);
+        assert_eq!(b.dim, Dim::LENGTH * Dim::LENGTH * Dim::TIME);
+
+        let c = eval_str("2^3 m");
+        assert_eq!(c.value, 8.0);
+        assert_eq!(c.dim, Dim::LENGTH);
+    }
+
+    #[test]
+    fn eval_force_dimensions() {
+        let f = eval_str("6 kg m / 2 s^2");
+        assert_eq!(f.value, 3.0);
+        assert_eq!(f.dim, Dim::MASS * Dim::LENGTH / (Dim::TIME * Dim::TIME));
+    }
+
+    #[test]
+    fn eval_juxtaposition_with_variables() {
+        let r = eval_with("2 x / 3 y", &[("x", q(6.0)), ("y", q(2.0))]);
+        assert_eq!(r.value, 2.0);
+        assert!(r.dim.is_zero());
+
+        let s = eval_with("x^2 y", &[("x", q(3.0)), ("y", q(2.0))]);
+        assert_eq!(s.value, 18.0);
+    }
+
+    #[test]
+    fn eval_parenthesised_groups_juxtapose() {
+        let r = eval_with("(a+b) c", &[("a", q(1.0)), ("b", q(2.0)), ("c", q(3.0))]);
+        assert_eq!(r.value, 9.0);
+
+        let s = eval_with(
+            "2 (a+b) / 3 c",
+            &[("a", q(1.0)), ("b", q(2.0)), ("c", q(1.0))],
+        );
+        assert_eq!(s.value, 2.0);
+    }
+
+    #[test]
+    fn eval_ms_is_one_unit_m_s_is_two() {
+        let ms = eval_str("5 ms");
+        assert_eq!(ms.value, 0.005);
+        assert_eq!(ms.dim, Dim::TIME);
+
+        let m_s = eval_str("5 m s");
+        assert_eq!(m_s.value, 5.0);
+        assert_eq!(m_s.dim, Dim::LENGTH * Dim::TIME);
+    }
+
+    #[test]
+    fn eval_unary_signs_with_juxtaposition() {
+        let a = eval_str("-2 m");
+        assert_eq!(a.value, -2.0);
+        assert_eq!(a.dim, Dim::LENGTH);
+
+        let b = eval_with("2 -x", &[("x", q(5.0))]);
+        assert_eq!(b.value, -3.0);
+
+        let c = eval_with("-x y", &[("x", q(2.0)), ("y", q(3.0))]);
+        assert_eq!(c.value, -6.0);
+    }
+
+    #[test]
+    fn eval_explicit_operators_keep_left_to_right() {
+        // Explicit '*' and '/' are untouched by the Mathcad rule.
+        let r = eval_str("5 * m / 2 * s");
+        assert_eq!(r.value, 2.5);
+        assert_eq!(r.dim, Dim::LENGTH * Dim::TIME);
+    }
+
+    #[test]
+    fn expand_calculus_inside_juxtaposition() {
+        let res = expand_calculus("2 deriv(x^2, x)", &HashMap::new()).unwrap();
+        assert_eq!(res, "2*(0)");
     }
 
     #[test]

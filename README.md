@@ -37,17 +37,21 @@ multiplication/division compose them; transcendental functions require
 dimensionless arguments.
 
 - Base units: `m s kg A K mol cd`; prefixed: `km cm mm g ms us ns`; constants `pi e`.
-- Implicit multiplication: `5 m`, `2(x)`, `3 sin(x)`.
+- Implicit multiplication (`5 m`, `2(x)`, `3 sin(x)`) binds **tighter than `*` and `/`**
+  (Mathcad semantics); powers bind tighter still. `ms` is one unit (milliseconds),
+  `m s` is metres·seconds.
 - Integer powers (`x^2`), `sqrt` halves dimensions, `min`/`max` require matching dims.
 
 ```text
-v := 5 m / (2 s)      →  2.5 m·s^-1
+v := 5 m / 2 s        →  2.5 m·s^-1      (juxtaposition groups: 5m / (2s))
+v := 5 m / (2 s)      →  2.5 m·s^-1      (parentheses still work)
+half := 1 / 2 m       →  0.5 m^-1        (1 / (2m), not (1/2)·m)
+area := 2 m^2         →  2 m^2           (power binds tighter: 2·(m^2))
 bad := 2 + 3 m        →  Dimension mismatch
 ```
 
-**Known quirk (fix planned):** juxtaposition currently binds at the same precedence
-as `*` and `/`, so `5 m / 2 s` parses as `(5·m/2)·s = 2.5 m·s`, not `2.5 m/s`.
-Parenthesize denominators until this is addressed.
+Explicit `*` and `/` keep ordinary left-to-right precedence: `5 * m / 2 * s` = 2.5 m·s.
+The Python pane shares the same preprocessor, so generated scripts evaluate identically.
 
 ## Calculus (numerical)
 
@@ -118,7 +122,7 @@ CI (GitHub Actions) runs tests on Ubuntu + Windows; fmt/clippy are gating.
 
 ## Roadmap
 
-- Mathcad semantics for juxtaposition precedence; non-finite calculus guards
+- Non-finite calculus guards
 - Derived units (N, J, W, Pa, Hz, V, Ω…), fractional exponents, variadic min/max, `root(f, x, guess)`
 - Range variables, vectors, matrices
 - Symbolic CAS (Symbolica) with the numerical engine as fallback
