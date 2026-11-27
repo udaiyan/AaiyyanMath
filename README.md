@@ -1,7 +1,7 @@
 # AaiyyanMath
 
-A Mathcad-inspired worksheet math app built with Rust, [egui/eframe](https://github.com/emilk/egui)
-and [exmex](https://crates.io/crates/exmex). Write math regions top-to-bottom, bind results
+A Mathcad-inspired worksheet math app built with Rust, egui/eframe
+and exmex. Write math regions top-to-bottom, bind results
 with `name := expression`, carry SI units through every calculation, take numerical
 derivatives and integrals, plot live — and export or run the whole worksheet as Python.
 
@@ -69,7 +69,20 @@ evaluate over the whole linspace.
 ## Persistence
 
 Save/Load buttons write `aaiyyanmath_doc.json` in the working directory, which is
-auto-loaded on startup.
+auto-loaded on startup. The document format is **versioned** (currently `version: 1`):
+
+- Legacy documents without a `version` field load normally and are stamped with the
+  current version on the next save.
+- Documents written by a **newer** app version are rejected with a clear error
+  instead of being silently mis-read.
+- On load, empty worksheet lists are repaired, an out-of-range active workspace is
+  clamped, and every worksheet is re-evaluated top-down — bindings are never trusted
+  from disk.
+
+The working document is **gitignored** (it is your local scratch state, not source).
+A committed, version-less example lives at `examples/sample_doc.json` and doubles as
+the backward-compatibility fixture in the test suite. To try it, copy it over
+`aaiyyanmath_doc.json` before launching the app.
 
 ## Architecture
 
