@@ -4,8 +4,10 @@ use crate::worksheet::Worksheet;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 
 const SAVE_FILE: &str = "aaiyyanmath_doc.json";
+const EXPORT_FILE: &str = "aaiyyanmath_export.py";
 
 /// On-disk document format version. `from_json` accepts documents at or below
 /// this version and rejects anything newer. Bump only with a migration plan.
@@ -23,6 +25,9 @@ pub struct MathcadApp {
     version: u32,
     worksheets: Vec<Worksheet>,
     active_idx: usize,
+    /// Optional Python interpreter override ("" = auto-detect). Persisted.
+    #[serde(default)]
+    python_path: String,
     #[serde(skip)]
     status_message: Option<String>,
     #[serde(skip)]
@@ -57,6 +62,7 @@ impl MathcadApp {
             version: DOC_VERSION,
             worksheets: vec![Worksheet::new("Scratchpad")],
             active_idx: 0,
+            python_path: String::new(),
             status_message: None,
             runner: PythonRunner::default(),
             plot_textures: Vec::new(),
@@ -141,11 +147,31 @@ impl MathcadApp {
                     self.version = loaded.version;
                     self.worksheets = loaded.worksheets;
                     self.active_idx = loaded.active_idx;
+                    self.python_path = loaded.python_path;
                     self.status_message = Some(format!("✅ Loaded from {}", SAVE_FILE));
                 }
                 Err(e) => self.status_message = Some(format!("❌ {}", e)),
             },
             Err(e) => self.status_message = Some(format!("❌ Read failed: {}", e)),
+        }
+    }
+
+    /// Write the active worksheet's generated Python to `path`.
+    fn export_python_to(&mut self, path: &Path) {
+        let code = match self.worksheets.get(self.active_idx) {
+            Some(ws) => generate_python(ws),
+            None => {
+                self.status_message = Some("❌ Export failed: no active worksheet".to_string());
+                return;
+            }
+        };
+        match fs::write(path, code) {
+            Ok(()) => {
+                self.status_message = Some(format!("✅ Exported to {}", path.display()));
+            }
+            Err(e) => {
+                self.status_message = Some(format!("❌ Export failed: {}", e));
+            }
         }
     }
 }
@@ -226,7 +252,8 @@ impl eframe::App for MathcadApp {
                         .clicked()
                     {
                         if let Some(ws) = self.worksheets.get(self.active_idx) {
-                            self.runner.start(ws);
+                            let interpreter = self.python_path.clone();
+                            self.runner.start(ws, &interpreter);
                         }
                     }
                     if self.runner.running {
@@ -256,8 +283,26 @@ impl eframe::App for MathcadApp {
                 }
                 ui.separator();
 
-                if let Some(ws) = self.worksheets.get(self.active_idx) {
-                    let code = generate_python(ws);
+                ui.horizontal(|ui| {
+                    ui.label("Interpreter:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.python_path)
+                            .hint_text("auto (python3 / python)")
+                            .desired_width(f32::INFINITY),
+                    );
+                });
+
+                let code = self.worksheets.get(self.active_idx).map(generate_python);
+                if let Some(code) = code {
+                    ui.horizontal(|ui| {
+                        if ui.button("📋 Copy").clicked() {
+                            ui.ctx().copy_text(code.clone());
+                            self.status_message = Some("✅ Python copied to clipboard".to_string());
+                        }
+                        if ui.button("⬇ Export .py").clicked() {
+                            self.export_python_to(Path::new(EXPORT_FILE));
+                        }
+                    });
                     let mut code_view = code.clone();
                     egui::ScrollArea::vertical()
                         .id_salt("py_code")
@@ -286,6 +331,10 @@ impl eframe::App for MathcadApp {
                                     egui::Color32::from_rgb(230, 120, 120),
                                     last.stderr.as_str(),
                                 );
+                                if let Some(hint) = crate::runner::missing_module_hint(&last.stderr)
+                                {
+                                    ui.colored_label(egui::Color32::from_rgb(230, 200, 120), hint);
+                                }
                             }
                             for tex in &self.plot_textures {
                                 ui.add(
@@ -392,6 +441,7 @@ mod tests {
         assert_eq!(app.worksheets.len(), 1);
         assert_eq!(app.worksheets[0].name, "Scratchpad");
         assert_eq!(app.active_idx, 0);
+        assert_eq!(app.python_path, "");
         assert!(app.status_message.is_none());
         assert_eq!(app.worksheets[0].bindings.get("a").unwrap().value, 14.0);
     }
@@ -420,6 +470,7 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["version"], serde_json::json!(DOC_VERSION));
+        assert_eq!(parsed["python_path"], serde_json::json!(""));
 
         let loaded = MathcadApp::from_json(&json).unwrap();
         assert_eq!(loaded.version, DOC_VERSION);
@@ -637,5 +688,55 @@ mod tests {
         doc["worksheets"][0]["bindings"] = serde_json::json!({ "a": 12345.0 });
         let app = MathcadApp::from_json(&doc.to_string()).unwrap();
         assert_eq!(app.worksheets[0].bindings.get("a").unwrap().value, 14.0);
+    }
+
+    #[test]
+    fn export_writes_generated_code_to_temp_path() {
+        let mut app = make_test_app();
+        let path = temp_json_path("export").with_extension("py");
+
+        app.export_python_to(&path);
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        let expected = generate_python(&app.worksheets[app.active_idx]);
+        assert_eq!(written, expected);
+        assert!(written.contains("x = 999*m"));
+        assert!(app.status_message.as_ref().unwrap().contains("Exported"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_to_bad_path_errors() {
+        let mut app = make_test_app();
+        let bad = std::env::temp_dir()
+            .join(format!("aaiyyanmath_missing_dir_{}", std::process::id()))
+            .join("export.py");
+
+        app.export_python_to(&bad);
+
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("Export failed"));
+        assert!(!bad.exists());
+    }
+
+    #[test]
+    fn python_path_roundtrips() {
+        let mut app = make_test_app();
+        app.python_path = "C:/Python312/python.exe".to_string();
+        let json = serde_json::to_string(&app).unwrap();
+        let loaded = MathcadApp::from_json(&json).unwrap();
+        assert_eq!(loaded.python_path, "C:/Python312/python.exe");
+    }
+
+    #[test]
+    fn python_path_defaults_to_empty_from_legacy_json() {
+        let app = MathcadApp::from_json(&legacy_doc().to_string()).unwrap();
+        assert_eq!(app.python_path, "");
+        let app = MathcadApp::from_json(include_str!("../examples/sample_doc.json")).unwrap();
+        assert_eq!(app.python_path, "");
     }
 }

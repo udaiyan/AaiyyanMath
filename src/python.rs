@@ -390,7 +390,10 @@ mod tests {
         ] {
             let ws = make_math_ws(label, "2 + 2");
             let code = generate_python(&ws);
-            assert!(!code.contains("import os"), "payload executed for {label:?}");
+            assert!(
+                !code.contains("import os"),
+                "payload executed for {label:?}"
+            );
             assert!(!code.contains("__import__"));
             assert!(!code.contains(label), "raw label echoed for {label:?}");
         }
@@ -401,10 +404,7 @@ mod tests {
         for kw in crate::label::PYTHON_KEYWORDS {
             let ws = make_math_ws(kw, "1");
             let code = generate_python(&ws);
-            assert!(
-                !code.contains(&format!("{kw} =")),
-                "keyword {kw} assigned"
-            );
+            assert!(!code.contains(&format!("{kw} =")), "keyword {kw} assigned");
         }
     }
 

@@ -66,6 +66,14 @@ cancel button); stdout/stderr and the rendered plots appear inline. Calculus map
 to generated `_deriv`/`_integ` helpers — no scipy needed, and plot expressions
 evaluate over the whole linspace.
 
+- **📋 Copy** puts the generated script on the clipboard; **⬇ Export .py** writes it
+  to `aaiyyanmath_export.py` in the working directory (gitignored).
+- **Interpreter** overrides the Python executable (name or full path); leave it blank
+  for auto-detection (`python`/`py` on Windows, `python3`/`python` elsewhere). The
+  override is saved with the document.
+- If a run fails with `ModuleNotFoundError`, the output panel names the missing
+  package and the fix: `pip install numpy pint matplotlib`.
+
 ## Persistence
 
 Save/Load buttons write `aaiyyanmath_doc.json` in the working directory, which is
